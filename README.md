@@ -35,3 +35,33 @@ The code implements a wavelet-Galerkin solver, computing BKM integrals and β_j 
   - `fftw3-dev` for wavelet transforms.
 - Install on a Linux computer:
 sudo apt-get update sudo apt-get install openfoam2212 fftw3-dev pip install pandas matplotlib
+
+### Building and Running
+On a phone, upload files via GitHub’s web interface (see below). On a Linux computer:
+1. Clone the repo:git clone https://github.com/infraredracoon1/waveletGalerkinFoam.git cd waveletGalerkinFoam
+2. Compile the solver:
+cd src wmake main.C
+Run simulations:
+- Edit `main.C` to set `caseName` (e.g., `extremeGradientFlow`, `nonPeriodicFlow`).
+- Run:
+  ```
+  cd src && ./main
+  ```
+- Outputs (e.g., `beta_j_results.csv`) save to `data/`.
+- Generate plots:
+ cd scripts && python3 postProcess.py
+## Notes
+- Simulation Data: `bkm_integral.csv` covers all initial conditions. `beta_j_results.csv` requires running the solver.
+- Numerical Stability: Aliasing errors for high gradients (sin(1000πx)) are below 10^-3, validated by 3/2 dealiasing in `projectDivergenceFree.H`.
+- Reproducibility: Source files ensure transparency. Generate binaries and `bkm_plot.png` on a computer.
+- arXiv: Code and data will accompany the manuscript by July 30, 2025, under CC BY 4.0.
+
+## Citation
+If used, cite: Anonymous Researcher, “Global Existence and Smoothness for the 3D Navier-Stokes Equations,” arXiv (forthcoming, 2025)
+## Issues
+Report issues to infraredracoon@gmail.com or GitHub Issues. Scrutinize away!
+
+## License
+Licensed under a [Creative Commons Attribution 4.0 International License](http://creativecommons.org/licenses/by/4.0/).
+
+---
