@@ -34,3 +34,4 @@ The code implements a wavelet-Galerkin solver, computing BKM integrals and β_j 
   - `OpenFOAM v2212` for solver compilation.
   - `fftw3-dev` for wavelet transforms.
 - Install on a Linux computer:
+sudo apt-get update sudo apt-get install openfoam2212 fftw3-dev pip install pandas matplotlib
