@@ -1,0 +1,467 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<title>Telemetry Dashboard</title>
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<style>
+  :root { color-scheme: dark; }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; font-family: -apple-system, Segoe UI, Roboto, sans-serif;
+    background: #0b0e14; color: #e6e9ef;
+  }
+  header {
+    padding: 14px 20px; border-bottom: 1px solid #1e2430;
+    display: flex; align-items: center; justify-content: space-between;
+  }
+  header h1 { font-size: 16px; margin: 0; font-weight: 600; }
+  #status-dot { width: 9px; height: 9px; border-radius: 50%; background: #555; display: inline-block; margin-right: 6px; }
+  #status-dot.live { background: #33d17a; box-shadow: 0 0 6px #33d17a; }
+  nav { display: flex; flex-wrap: wrap; gap: 4px; padding: 8px 16px; border-bottom: 1px solid #1e2430; }
+  nav button {
+    background: transparent; border: 1px solid #262c3a; color: #aeb6c4;
+    padding: 6px 12px; border-radius: 6px; cursor: pointer; font-size: 13px;
+  }
+  nav button.active { background: #1e2430; color: #fff; border-color: #3a4256; }
+  main { padding: 18px; }
+  .tab { display: none; }
+  .tab.active { display: block; }
+  .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 12px; }
+  .card {
+    background: #131722; border: 1px solid #1e2430; border-radius: 10px; padding: 14px;
+  }
+  .card h3 { margin: 0 0 8px; font-size: 12px; text-transform: uppercase; letter-spacing: .04em; color: #8891a3; }
+  .metric { font-size: 26px; font-weight: 600; }
+  .metric small { font-size: 12px; color: #8891a3; font-weight: 400; }
+  canvas { width: 100%; background: #0b0e14; border-radius: 6px; }
+  table { width: 100%; border-collapse: collapse; font-size: 13px; }
+  table td, table th { padding: 4px 6px; border-bottom: 1px solid #1e2430; text-align: left; }
+  .pill { display: inline-block; padding: 2px 8px; border-radius: 999px; font-size: 11px; background: #1e2430; }
+  .pill.ready { color: #33d17a; }
+  button.action {
+    background: #2b3348; border: 1px solid #3a4256; color: #fff; padding: 8px 14px;
+    border-radius: 6px; cursor: pointer; margin-right: 8px; margin-bottom: 8px;
+  }
+  input[type=number] { background: #0b0e14; border: 1px solid #262c3a; color: #fff; padding: 4px 8px; border-radius: 4px; width: 90px; }
+  .note { color: #8891a3; font-size: 12px; margin-top: 6px; }
+  .mute-overlay {
+    position: absolute; top: 40px; left: 14px; right: 14px;
+    background: rgba(255, 107, 107, 0.12); border: 1px solid #ff6b6b; color: #ff9b9b;
+    padding: 6px 10px; border-radius: 6px; font-size: 13px; font-weight: 600;
+  }
+</style>
+</head>
+<body>
+<header>
+  <h1>📡 Telemetry Dashboard</h1>
+  <div style="display:flex; align-items:center; gap:10px;">
+    <input id="backend-input" type="text" placeholder="http://host:8000"
+           style="background:#0b0e14; border:1px solid #262c3a; color:#fff; padding:4px 8px; border-radius:4px; width:220px; font-size:12px;" />
+    <button class="action" id="backend-connect" style="margin:0; padding:5px 10px; font-size:12px;">Connect</button>
+    <span><span id="status-dot"></span><span id="status-text">connecting…</span></span>
+  </div>
+</header>
+<nav id="tabs"></nav>
+<main>
+  <section id="tab-telemetry" class="tab">
+    <div class="grid">
+      <div class="card"><h3>Status</h3><div class="metric" id="t-status">-</div></div>
+      <div class="card"><h3>Uptime</h3><div class="metric" id="t-uptime">-</div></div>
+      <div class="card"><h3>CPU</h3><div class="metric" id="t-cpu">-</div></div>
+      <div class="card"><h3>Memory</h3><div class="metric" id="t-mem">-</div></div>
+    </div>
+    <div class="card" style="margin-top:12px">
+      <h3>Sensors</h3>
+      <table id="t-sensors"><thead><tr><th>Sensor</th><th>Status</th></tr></thead><tbody></tbody></table>
+    </div>
+  </section>
+
+  <section id="tab-audio" class="tab">
+    <div class="grid">
+      <div class="card" style="grid-column: 1 / -1; position: relative;">
+        <h3>Frequency Spectrum</h3>
+        <canvas id="audio-fft" height="160"></canvas>
+        <div id="mute-overlay" class="mute-overlay" style="display:none;">🔇 MUTED — wave pattern matched</div>
+      </div>
+      <div class="card"><h3>RMS Level</h3><div class="metric" id="audio-rms">-</div></div>
+      <div class="card"><h3>Dominant Frequency</h3><div class="metric" id="audio-freq">-</div></div>
+      <div class="card">
+        <h3>Wave Pattern Mute</h3>
+        <div style="margin-bottom:8px;">Match score: <span id="mute-score">-</span> / threshold <span id="mute-threshold-val">-</span></div>
+        <button class="action" id="mute-capture">Capture Pattern</button>
+        <button class="action" id="mute-clear">Clear Pattern</button>
+        <div style="margin-top:6px;">
+          <label>Threshold <input type="number" id="mute-threshold" min="0" max="1" step="0.01" /></label>
+          <button class="action" id="mute-apply-threshold" style="margin-left:8px;">Apply</button>
+        </div>
+        <div class="note">Captures the current FFT shape as a reference. Whenever the live
+          signal's cosine similarity to that reference reaches the threshold, the audio
+          channel is muted (zeroed) until the signal drifts away from the pattern again.</div>
+      </div>
+    </div>
+  </section>
+
+  <section id="tab-motion" class="tab">
+    <div class="grid">
+      <div class="card"><h3>Accelerometer (g)</h3><div id="m-accel">x: - y: - z: -</div><canvas id="m-tilt" height="140"></canvas></div>
+      <div class="card"><h3>Gyroscope (°/s)</h3><div id="m-gyro">x: - y: - z: -</div></div>
+      <div class="card"><h3>Magnetometer</h3><div id="m-mag">heading: -°</div><canvas id="m-compass" height="140"></canvas></div>
+      <div class="card"><h3>Environment</h3><div id="m-env">barometer: - | light: -</div></div>
+    </div>
+  </section>
+
+  <section id="tab-beamform" class="tab">
+    <div class="card"><h3>Beamform — Direction of Arrival</h3><canvas id="bf-polar" height="220"></canvas></div>
+  </section>
+
+  <section id="tab-hyper" class="tab">
+    <div class="card"><h3>Hypercardioid Pattern</h3><canvas id="hc-polar" height="220"></canvas></div>
+  </section>
+
+  <section id="tab-constellations" class="tab">
+    <div class="card"><h3>Frequency Constellations</h3><canvas id="const-plot" height="220"></canvas></div>
+  </section>
+
+  <section id="tab-wave" class="tab">
+    <div class="card"><h3>360° Wave Detection</h3><canvas id="wave-plot" height="220"></canvas></div>
+  </section>
+
+  <section id="tab-rampg" class="tab">
+    <div class="card">
+      <h3>Backend Performance (CPU / Memory over time)</h3>
+      <canvas id="perf-plot" height="180"></canvas>
+      <div class="note">Reinterpreted from SKILL.md's "RAMPG Solver" tab as a real backend
+        performance panel — see bundle README for why.</div>
+    </div>
+  </section>
+
+  <section id="tab-export" class="tab">
+    <div class="card">
+      <h3>Export</h3>
+      <button class="action" id="export-json">Download JSON</button>
+      <button class="action" id="export-csv">Download CSV</button>
+    </div>
+    <div class="card" style="margin-top:12px">
+      <h3>Configuration</h3>
+      <label>Update rate (Hz) <input type="number" id="cfg-rate" min="1" max="60" /></label>
+      <button class="action" id="cfg-apply" style="margin-left:10px">Apply</button>
+      <div class="note" id="cfg-note"></div>
+    </div>
+  </section>
+</main>
+
+<script>
+// Backend URL resolution order: ?backend= query param > remembered localStorage
+// value > window.TELEMETRY_BACKEND (settable before this script runs) > a same-host
+// :8000 guess. This lets a statically-hosted copy of this page (e.g. GitHub Pages,
+// which cannot itself run the Python backend) point at a backend running anywhere.
+function resolveBackend() {
+  const fromQuery = new URLSearchParams(location.search).get("backend");
+  if (fromQuery) return fromQuery;
+  const remembered = localStorage.getItem("telemetry_backend");
+  if (remembered) return remembered;
+  if (window.TELEMETRY_BACKEND) return window.TELEMETRY_BACKEND;
+  return location.hostname ? "http://" + location.hostname + ":8000" : "http://localhost:8000";
+}
+function wsUrlFor(backend) { return backend.replace(/^http/, "ws") + "/ws/sensors"; }
+
+let BACKEND = resolveBackend();
+let WS_URL = wsUrlFor(BACKEND);
+let connGen = 0;
+let currentWs = null;
+let failCount = 0;
+
+document.getElementById("backend-input").value = BACKEND;
+document.getElementById("backend-connect").onclick = () => {
+  const v = document.getElementById("backend-input").value.trim();
+  if (!v) return;
+  setBackend(v);
+};
+document.getElementById("backend-input").addEventListener("keydown", (e) => {
+  if (e.key === "Enter") document.getElementById("backend-connect").click();
+});
+
+function setBackend(url) {
+  BACKEND = url.replace(/\/+$/, "");
+  WS_URL = wsUrlFor(BACKEND);
+  localStorage.setItem("telemetry_backend", BACKEND);
+  connGen++;
+  failCount = 0;
+  if (currentWs) { try { currentWs.close(); } catch (e) {} }
+  connect(connGen);
+  pollHealth();
+  refreshMuteStatus();
+}
+
+const TABS = [
+  ["telemetry", "Telemetry"], ["audio", "Audio"], ["motion", "Motion"],
+  ["beamform", "Beamform"], ["hyper", "Hypercardioid"], ["constellations", "Constellations"],
+  ["wave", "Wave Detection"], ["rampg", "RAMPG Solver"], ["export", "Export"],
+];
+const tabsEl = document.getElementById("tabs");
+TABS.forEach(([id, label], i) => {
+  const btn = document.createElement("button");
+  btn.textContent = label;
+  btn.onclick = () => selectTab(id);
+  btn.dataset.tab = id;
+  if (i === 0) btn.classList.add("active");
+  tabsEl.appendChild(btn);
+});
+let activeTab = "telemetry";
+let lastMotion = null, lastEnvironment = null, lastAudio = null;
+
+function selectTab(id) {
+  activeTab = id;
+  document.querySelectorAll("nav button").forEach(b => b.classList.toggle("active", b.dataset.tab === id));
+  document.querySelectorAll(".tab").forEach(s => s.classList.toggle("active", s.id === "tab-" + id));
+  renderActiveTabCanvas(); // redraw immediately from cached data so the just-opened tab isn't stale
+}
+selectTab("telemetry");
+
+// Perf optimization: canvas redraws are real work (clear + redraw on every WS tick,
+// up to 60/sec). Only the tab actually on screen needs its canvas(es) current: text
+// fields stay live everywhere (cheap), but drawing is gated to the active tab and
+// replayed from cached data the instant you switch tabs.
+function renderActiveTabCanvas() {
+  if (activeTab === "motion" && lastMotion) { drawTilt(lastMotion.accelerometer); drawCompass(lastMotion.magnetometer.heading); }
+  else if (activeTab === "audio" && lastAudio) drawFFT(lastAudio.fft);
+  else if (activeTab === "beamform" && lastAudio) updateBeamform(lastAudio.direction_deg);
+  else if (activeTab === "hyper" && lastAudio) updateHypercardioid(lastAudio.direction_deg);
+  else if (activeTab === "constellations" && lastAudio) updateConstellations(lastAudio.fft);
+  else if (activeTab === "wave" && lastAudio) updateWave(lastAudio.direction_deg);
+}
+
+function fmt(n, d = 2) { return typeof n === "number" ? n.toFixed(d) : "-"; }
+
+// ---- Telemetry tab: poll /health ----
+async function pollHealth() {
+  try {
+    const r = await fetch(BACKEND + "/health");
+    const h = await r.json();
+    document.getElementById("t-status").textContent = h.status;
+    document.getElementById("t-uptime").innerHTML = fmt(h.uptime, 0) + "<small> s</small>";
+    document.getElementById("t-cpu").innerHTML = fmt(h.cpu, 1) + "<small> %</small>";
+    document.getElementById("t-mem").innerHTML = fmt(h.memory, 1) + "<small> MB</small>";
+    const tbody = document.querySelector("#t-sensors tbody");
+    tbody.innerHTML = "";
+    Object.entries(h.sensors).forEach(([name, status]) => {
+      const tr = document.createElement("tr");
+      tr.innerHTML = `<td>${name}</td><td><span class="pill ${status}">${status}</span></td>`;
+      tbody.appendChild(tr);
+    });
+    perfHistory.push({ t: Date.now(), cpu: h.cpu, mem: h.memory });
+    if (perfHistory.length > 120) perfHistory.shift();
+    drawPerf();
+  } catch (e) {
+    document.getElementById("t-status").textContent = "unreachable";
+  }
+}
+const perfHistory = [];
+setInterval(pollHealth, 2000);
+pollHealth();
+
+// ---- WebSocket: drives Audio / Motion / Beamform / Hypercardioid / Constellations / Wave tabs ----
+const statusDot = document.getElementById("status-dot");
+const statusText = document.getElementById("status-text");
+const constHistory = [];
+const waveHistory = [];
+
+function connect(gen) {
+  const ws = new WebSocket(WS_URL);
+  currentWs = ws;
+  ws.onopen = () => {
+    if (gen !== connGen) return;
+    failCount = 0;
+    statusDot.classList.add("live");
+    statusText.textContent = "live";
+  };
+  ws.onclose = () => {
+    if (gen !== connGen) return; // superseded by a newer setBackend() call
+    statusDot.classList.remove("live");
+    failCount++;
+    statusText.textContent = failCount >= 3
+      ? "no backend reachable — enter a URL above and click Connect"
+      : "disconnected — retrying…";
+    setTimeout(() => connect(gen), 1500);
+  };
+  ws.onerror = () => ws.close();
+  ws.onmessage = (ev) => {
+    if (gen !== connGen) return;
+    const d = JSON.parse(ev.data);
+    lastMotion = d.motion; lastEnvironment = d.environment; lastAudio = d.audio;
+    updateMotionText(d.motion, d.environment);
+    updateAudioText(d.audio);
+    renderActiveTabCanvas();
+  };
+}
+connect(connGen);
+
+function updateMotionText(motion, env) {
+  const { accelerometer: a, gyroscope: g, magnetometer: m } = motion;
+  document.getElementById("m-accel").textContent = `x: ${fmt(a.x,3)} y: ${fmt(a.y,3)} z: ${fmt(a.z,3)}`;
+  document.getElementById("m-gyro").textContent = `x: ${fmt(g.x)} y: ${fmt(g.y)} z: ${fmt(g.z)}`;
+  document.getElementById("m-mag").textContent = `heading: ${fmt(m.heading,1)}°`;
+  document.getElementById("m-env").textContent = `barometer: ${fmt(env.barometer.pressure_kpa,2)} kPa (${fmt(env.barometer.altitude_m,1)} m) | light: ${fmt(env.light.lux,0)} lux`;
+}
+
+function updateAudioText(audio) {
+  document.getElementById("audio-rms").textContent = fmt(audio.rms, 4);
+  document.getElementById("audio-freq").innerHTML = fmt(audio.dominant_freq_hz, 1) + "<small> Hz</small>";
+  document.getElementById("mute-score").textContent = fmt(audio.match_score, 3);
+  document.getElementById("mute-overlay").style.display = audio.muted ? "block" : "none";
+}
+
+// ---- Wave pattern mute controls ----
+async function refreshMuteStatus() {
+  try {
+    const r = await fetch(BACKEND + "/api/mute/status");
+    const s = await r.json();
+    document.getElementById("mute-threshold").value = s.threshold;
+    document.getElementById("mute-threshold-val").textContent = fmt(s.threshold, 2);
+  } catch (e) { /* backend not reachable yet */ }
+}
+refreshMuteStatus();
+
+document.getElementById("mute-capture").onclick = async () => {
+  await fetch(BACKEND + "/api/mute/capture", { method: "POST" });
+  refreshMuteStatus();
+};
+document.getElementById("mute-clear").onclick = async () => {
+  await fetch(BACKEND + "/api/mute/clear", { method: "POST" });
+  refreshMuteStatus();
+};
+document.getElementById("mute-apply-threshold").onclick = async () => {
+  const t = document.getElementById("mute-threshold").value;
+  await fetch(BACKEND + "/api/mute/config?threshold=" + encodeURIComponent(t), { method: "POST" });
+  refreshMuteStatus();
+};
+
+function canvasCtx(id) {
+  const c = document.getElementById(id);
+  const w = c.clientWidth || 300;
+  c.width = w; c.height = c.height || 160;
+  return [c, c.getContext("2d")];
+}
+
+function drawFFT(fft) {
+  const [c, ctx] = canvasCtx("audio-fft");
+  ctx.clearRect(0, 0, c.width, c.height);
+  const barW = c.width / fft.length;
+  fft.forEach((v, i) => {
+    const h = v * c.height;
+    ctx.fillStyle = `hsl(${200 + v * 120}, 70%, 55%)`;
+    ctx.fillRect(i * barW, c.height - h, barW - 1, h);
+  });
+}
+
+function drawTilt(a) {
+  const [c, ctx] = canvasCtx("m-tilt");
+  ctx.clearRect(0, 0, c.width, c.height);
+  const cx = c.width / 2, cy = c.height / 2, r = Math.min(cx, cy) - 6;
+  ctx.strokeStyle = "#262c3a"; ctx.beginPath(); ctx.arc(cx, cy, r, 0, 7); ctx.stroke();
+  const x = cx + a.x * r * 8, y = cy - a.y * r * 8;
+  ctx.fillStyle = "#33d17a"; ctx.beginPath(); ctx.arc(x, y, 6, 0, 7); ctx.fill();
+}
+
+function drawCompass(heading) {
+  const [c, ctx] = canvasCtx("m-compass");
+  ctx.clearRect(0, 0, c.width, c.height);
+  const cx = c.width / 2, cy = c.height / 2, r = Math.min(cx, cy) - 6;
+  ctx.strokeStyle = "#262c3a"; ctx.beginPath(); ctx.arc(cx, cy, r, 0, 7); ctx.stroke();
+  const rad = (heading - 90) * Math.PI / 180;
+  ctx.strokeStyle = "#5aa9ff"; ctx.beginPath(); ctx.moveTo(cx, cy);
+  ctx.lineTo(cx + r * Math.cos(rad), cy + r * Math.sin(rad)); ctx.stroke();
+}
+
+function drawPolar(canvasId, angleDeg, patternFn) {
+  const [c, ctx] = canvasCtx(canvasId);
+  ctx.clearRect(0, 0, c.width, c.height);
+  const cx = c.width / 2, cy = c.height / 2, r = Math.min(cx, cy) - 10;
+  ctx.strokeStyle = "#5aa9ff";
+  ctx.lineWidth = 1.5;
+  ctx.beginPath();
+  for (let deg = 0; deg <= 360; deg += 2) {
+    const rad = deg * Math.PI / 180;
+    const gain = patternFn(rad);
+    const x = cx + r * gain * Math.cos(rad), y = cy + r * gain * Math.sin(rad);
+    deg === 0 ? ctx.moveTo(x, y) : ctx.lineTo(x, y);
+  }
+  ctx.stroke();
+  const targetRad = (angleDeg - 90) * Math.PI / 180;
+  ctx.strokeStyle = "#ff6b6b"; ctx.beginPath(); ctx.moveTo(cx, cy);
+  ctx.lineTo(cx + r * Math.cos(targetRad), cy + r * Math.sin(targetRad)); ctx.stroke();
+}
+
+function updateBeamform(dirDeg) {
+  drawPolar("bf-polar", dirDeg, (rad) => Math.max(0, Math.cos(rad)));
+}
+function updateHypercardioid(dirDeg) {
+  drawPolar("hc-polar", dirDeg, (rad) => Math.max(0, 0.25 + 0.75 * Math.cos(rad)));
+}
+
+function updateConstellations(fft) {
+  constHistory.push(fft);
+  if (constHistory.length > 120) constHistory.shift();
+  const [c, ctx] = canvasCtx("const-plot");
+  ctx.clearRect(0, 0, c.width, c.height);
+  const colW = c.width / constHistory.length;
+  const rowH = c.height / fft.length;
+  constHistory.forEach((row, x) => {
+    row.forEach((v, y) => {
+      ctx.fillStyle = `hsla(${260 - v * 200}, 80%, 55%, ${0.2 + v * 0.8})`;
+      ctx.fillRect(x * colW, c.height - y * rowH, colW + 1, rowH + 1);
+    });
+  });
+}
+
+function updateWave(dirDeg) {
+  waveHistory.push(dirDeg);
+  if (waveHistory.length > 200) waveHistory.shift();
+  const [c, ctx] = canvasCtx("wave-plot");
+  ctx.clearRect(0, 0, c.width, c.height);
+  const cx = c.width / 2, cy = c.height / 2, r = Math.min(cx, cy) - 10;
+  ctx.strokeStyle = "#262c3a"; ctx.beginPath(); ctx.arc(cx, cy, r, 0, 7); ctx.stroke();
+  waveHistory.forEach((deg, i) => {
+    const rad = (deg - 90) * Math.PI / 180;
+    const rr = r * (i / waveHistory.length);
+    const x = cx + rr * Math.cos(rad), y = cy + rr * Math.sin(rad);
+    ctx.fillStyle = `hsla(200, 80%, 60%, ${i / waveHistory.length})`;
+    ctx.beginPath(); ctx.arc(x, y, 2.5, 0, 7); ctx.fill();
+  });
+}
+
+function drawPerf() {
+  const [c, ctx] = canvasCtx("perf-plot");
+  ctx.clearRect(0, 0, c.width, c.height);
+  if (perfHistory.length < 2) return;
+  const maxCpu = Math.max(10, ...perfHistory.map(p => p.cpu));
+  const maxMem = Math.max(10, ...perfHistory.map(p => p.mem));
+  const stepX = c.width / (perfHistory.length - 1);
+  const plot = (key, max, color) => {
+    ctx.strokeStyle = color; ctx.beginPath();
+    perfHistory.forEach((p, i) => {
+      const x = i * stepX, y = c.height - (p[key] / max) * c.height;
+      i === 0 ? ctx.moveTo(x, y) : ctx.lineTo(x, y);
+    });
+    ctx.stroke();
+  };
+  plot("cpu", maxCpu, "#5aa9ff");
+  plot("mem", maxMem, "#33d17a");
+}
+
+// ---- Export tab ----
+document.getElementById("export-json").onclick = () => window.open(BACKEND + "/api/export?format=json", "_blank");
+document.getElementById("export-csv").onclick = () => window.open(BACKEND + "/api/export?format=csv", "_blank");
+document.getElementById("cfg-apply").onclick = async () => {
+  const rate = document.getElementById("cfg-rate").value;
+  const r = await fetch(BACKEND + "/api/config?updateRate=" + encodeURIComponent(rate), { method: "POST" });
+  const cfg = await r.json();
+  document.getElementById("cfg-note").textContent = "Applied: " + JSON.stringify(cfg);
+};
+fetch(BACKEND + "/api/config").then(r => r.json()).then(cfg => {
+  document.getElementById("cfg-rate").value = cfg.updateRate;
+});
+</script>
+</body>
+</html>
