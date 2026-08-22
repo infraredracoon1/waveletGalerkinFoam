@@ -4,7 +4,9 @@ Simulates 6 sensors (accelerometer, gyroscope, magnetometer, barometer,
 microphone, light) since this environment has no real hardware sensors, and
 serves them over REST + WebSocket in the shape described by the skill's
 SKILL.md. Values are physically plausible (noise/drift around real-world
-baselines), not random garbage.
+baselines), not random garbage. Includes advanced wave mode decomposition
+(spherical, helical, resonance, backscatter, symmetry) with holographic
+tensor projection for efficient multi-modal analysis.
 """
 import asyncio
 import csv
@@ -27,7 +29,10 @@ try:
 except ImportError:  # pragma: no cover - optional dependency
     psutil = None
 
-app = FastAPI(title="Telemetry Dashboard Backend", version="1.6.0")
+from wave_modes import analyze_all_modes
+from holographic_projection import project_all_modes
+
+app = FastAPI(title="Telemetry Dashboard Backend", version="2.0.0")
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
@@ -42,10 +47,14 @@ CONFIG = {
     "sampleRate": int(os.environ.get("TELEMETRY_SAMPLE_RATE", 44100)),
     "fftSize": int(os.environ.get("TELEMETRY_FFT_SIZE", 2048)),
     "updateRate": int(os.environ.get("TELEMETRY_UPDATE_RATE", 30)),
+    "tensorRank": int(os.environ.get("TELEMETRY_TENSOR_RANK", 6)),
 }
 
 HISTORY_MAXLEN = 3600
 history: deque = deque(maxlen=HISTORY_MAXLEN)
+
+MODE_HISTORY_MAXLEN = 30  # ~1 second at 30 Hz
+mode_history: deque = deque(maxlen=MODE_HISTORY_MAXLEN)
 
 CALIBRATION = {
     "accelerometer": {"offset": [0.0, 0.0, 0.0]},
@@ -198,12 +207,22 @@ def read_sensors() -> dict:
 
     solver = run_orientation_solver(accel, gyro, t)
 
+    # Compute advanced wave mode decomposition (spherical, helical, resonance, backscatter, symmetry)
+    fft_mag_np = np.asarray(fft_mag, dtype=float)
+    modes = analyze_all_modes(fft_mag_np, reference_pattern=PATTERN_MATCH["target"])
+
+    # Compute holographic tensor projection with rank validation
+    holographic = project_all_modes(modes, fft_mag_np, tensor_rank=CONFIG["tensorRank"])
+    mode_history.append(modes)
+
     return {
         "timestamp": time.time(),
         "motion": {"accelerometer": accel, "gyroscope": gyro, "magnetometer": mag},
         "environment": {"barometer": baro, "light": light_sensor},
         "audio": audio,
         "solver": solver,
+        "modes": modes,
+        "holographic_projection": holographic.get("holographic_projection", {}),
     }
 
 
@@ -300,6 +319,29 @@ def mute_config(threshold: float = Query(..., ge=0.0, le=1.0)):
     return mute_status()
 
 
+@app.get("/api/modes")
+def get_modes():
+    """Return current wave mode decomposition (spherical, helical, resonance, backscatter, symmetry)."""
+    if not mode_history:
+        return {}
+    return mode_history[-1]
+
+
+@app.get("/api/modes/holographic_bounds")
+def get_holographic_bounds():
+    """Return holographic tensor projection status and bounds validation."""
+    reading = read_sensors()
+    holographic = reading.get("holographic_projection", {})
+    return {
+        "tensor_rank": CONFIG["tensorRank"],
+        "holographic_bound": holographic.get("holographic_bound", "UNKNOWN"),
+        "bound_maintained": holographic.get("bound_maintained", False),
+        "compression_ratio": holographic.get("compression_ratio", 1.0),
+        "energy_preserved_pct": holographic.get("energy_preserved_pct", 0.0),
+        "status": holographic.get("bound_status", "⚠️  Unknown"),
+    }
+
+
 @app.get("/api/config")
 def get_config():
     return CONFIG
@@ -310,6 +352,7 @@ def set_config(
     sampleRate: Optional[int] = None,
     fftSize: Optional[int] = None,
     updateRate: Optional[int] = None,
+    tensorRank: Optional[int] = None,
 ):
     if sampleRate:
         CONFIG["sampleRate"] = sampleRate
@@ -317,6 +360,8 @@ def set_config(
         CONFIG["fftSize"] = fftSize
     if updateRate:
         CONFIG["updateRate"] = updateRate
+    if tensorRank:
+        CONFIG["tensorRank"] = max(2, min(int(tensorRank), 10))
     return CONFIG
 
 
@@ -345,6 +390,16 @@ def export(format: str = "json"):
                 "solver_roll_deg",
                 "solver_pitch_deg",
                 "solver_residual_deg",
+                "spherical_l0_mag",
+                "spherical_l1_mag",
+                "spherical_l2_mag",
+                "resonance_peak_hz",
+                "resonance_q_factor",
+                "backscatter_correlation",
+                "symmetry_ratio",
+                "holographic_rank",
+                "holographic_compression_ratio",
+                "holographic_bound_maintained",
             ]
         )
         for h in rows:
@@ -352,6 +407,13 @@ def export(format: str = "json"):
             b, l = h["environment"]["barometer"], h["environment"]["light"]
             au = h["audio"]
             sv = h.get("solver", {})
+            modes = h.get("modes", {})
+            spherical = modes.get("spherical", {})
+            resonance = modes.get("resonance", [{}])[0]
+            backscatter = modes.get("backscatter", {})
+            symmetry = modes.get("symmetry", {})
+            holo = h.get("holographic_projection", {})
+
             writer.writerow(
                 [
                     h["timestamp"],
@@ -371,6 +433,16 @@ def export(format: str = "json"):
                     sv.get("roll_deg", 0.0),
                     sv.get("pitch_deg", 0.0),
                     sv.get("residual_deg", 0.0),
+                    spherical.get("l0", {}).get("magnitude", 0.0),
+                    spherical.get("l1", {}).get("magnitude", 0.0),
+                    spherical.get("l2", {}).get("magnitude", 0.0),
+                    resonance.get("bin_index", 0) * CONFIG["sampleRate"] / 64,
+                    resonance.get("q_factor", 0.0),
+                    backscatter.get("correlation", 0.0),
+                    symmetry.get("symmetric_ratio", 0.0),
+                    holo.get("tensor_rank", 0),
+                    holo.get("compression_ratio", 0.0),
+                    holo.get("bound_maintained", False),
                 ]
             )
         buf.seek(0)

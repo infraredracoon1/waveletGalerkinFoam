@@ -76,6 +76,17 @@ jobs:
           curl -sf -X POST http://localhost:8000/api/mute/clear | grep -q '"muted":false'
           curl -sf -X POST "http://localhost:8000/api/mute/config?threshold=0.75" | grep -q '"threshold":0.75'
 
+      - name: Exercise the advanced wave mode analysis API
+        run: |
+          set -euo pipefail
+          curl -sf http://localhost:8000/api/modes | tee /dev/stderr | grep -q '"spherical"'
+          curl -sf http://localhost:8000/api/modes | tee /dev/stderr | grep -q '"helical"'
+          curl -sf http://localhost:8000/api/modes | tee /dev/stderr | grep -q '"resonance"'
+          curl -sf http://localhost:8000/api/modes | tee /dev/stderr | grep -q '"backscatter"'
+          curl -sf http://localhost:8000/api/modes | tee /dev/stderr | grep -q '"symmetry"'
+          curl -sf http://localhost:8000/api/modes/holographic_bounds | tee /dev/stderr | grep -q '"holographic_bound"'
+          curl -sf http://localhost:8000/api/modes/holographic_bounds | tee /dev/stderr | grep -q '"bound_maintained"'
+
       - name: Check the WebSocket stream produces a valid reading
         run: |
           pip install --quiet websockets
@@ -86,10 +97,12 @@ jobs:
           async def main():
               async with websockets.connect("ws://localhost:8000/ws/sensors") as ws:
                   msg = json.loads(await asyncio.wait_for(ws.recv(), timeout=5))
-              for key in ("timestamp", "motion", "environment", "audio", "solver"):
+              for key in ("timestamp", "motion", "environment", "audio", "solver", "modes", "holographic_projection"):
                   assert key in msg, f"missing {key} in WS payload"
               assert "fft" in msg["audio"] and "muted" in msg["audio"]
               assert "roll_deg" in msg["solver"] and "residual_deg" in msg["solver"]
+              assert "spherical" in msg["modes"] and "helical" in msg["modes"]
+              assert "tensor_rank" in msg["holographic_projection"]
               print("WS payload OK:", list(msg.keys()))
 
           asyncio.run(main())
