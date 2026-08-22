@@ -131,6 +131,11 @@ jobs:
 
       - name: Configure Pages
         uses: actions/configure-pages@v5
+        with:
+          # Auto-create the Pages site via the API if it doesn't exist yet,
+          # instead of relying solely on the repo's Settings -> Pages UI
+          # (which several manual attempts didn't get to stick).
+          enablement: true
 
       - name: Upload Pages artifact
         uses: actions/upload-pages-artifact@v3
