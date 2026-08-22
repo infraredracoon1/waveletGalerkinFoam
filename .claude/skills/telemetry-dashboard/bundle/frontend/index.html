@@ -128,12 +128,24 @@
   </section>
 
   <section id="tab-rampg" class="tab">
-    <div class="card">
-      <h3>Backend Performance (CPU / Memory over time)</h3>
-      <canvas id="perf-plot" height="180"></canvas>
-      <div class="note">Reinterpreted from SKILL.md's "RAMPG Solver" tab as a real backend
-        performance panel — see bundle README for why.</div>
+    <div class="grid">
+      <div class="card">
+        <h3>Orientation Solver — Accel + Gyro Complementary Filter</h3>
+        <canvas id="solver-horizon" height="180"></canvas>
+        <div style="margin-top:8px;">
+          Roll: <span id="solver-roll">-</span>° &nbsp; Pitch: <span id="solver-pitch">-</span>°
+        </div>
+        <div>Residual (accel/gyro disagreement): <span id="solver-residual">-</span>°</div>
+      </div>
+      <div class="card">
+        <h3>Backend Performance (CPU / Memory over time)</h3>
+        <canvas id="perf-plot" height="180"></canvas>
+      </div>
     </div>
+    <div class="note" style="margin-top:10px;">Reinterpreted from SKILL.md's "RAMPG Solver" tab:
+      the perf chart is real backend telemetry; the orientation solver is a genuine sensor-fusion
+      algorithm (complementary filter) connecting the accelerometer and gyroscope — not a
+      fabricated metric. See bundle README for why.</div>
   </section>
 
   <section id="tab-export" class="tab">
@@ -209,7 +221,7 @@ TABS.forEach(([id, label], i) => {
   tabsEl.appendChild(btn);
 });
 let activeTab = "telemetry";
-let lastMotion = null, lastEnvironment = null, lastAudio = null;
+let lastMotion = null, lastEnvironment = null, lastAudio = null, lastSolver = null;
 
 function selectTab(id) {
   activeTab = id;
@@ -230,6 +242,7 @@ function renderActiveTabCanvas() {
   else if (activeTab === "hyper" && lastAudio) updateHypercardioid(lastAudio.direction_deg);
   else if (activeTab === "constellations" && lastAudio) updateConstellations(lastAudio.fft);
   else if (activeTab === "wave" && lastAudio) updateWave(lastAudio.direction_deg);
+  else if (activeTab === "rampg" && lastSolver) drawHorizon(lastSolver.roll_deg, lastSolver.pitch_deg);
 }
 
 function fmt(n, d = 2) { return typeof n === "number" ? n.toFixed(d) : "-"; }
@@ -289,9 +302,10 @@ function connect(gen) {
   ws.onmessage = (ev) => {
     if (gen !== connGen) return;
     const d = JSON.parse(ev.data);
-    lastMotion = d.motion; lastEnvironment = d.environment; lastAudio = d.audio;
+    lastMotion = d.motion; lastEnvironment = d.environment; lastAudio = d.audio; lastSolver = d.solver;
     updateMotionText(d.motion, d.environment);
     updateAudioText(d.audio);
+    updateSolverText(d.solver);
     renderActiveTabCanvas();
   };
 }
@@ -310,6 +324,13 @@ function updateAudioText(audio) {
   document.getElementById("audio-freq").innerHTML = fmt(audio.dominant_freq_hz, 1) + "<small> Hz</small>";
   document.getElementById("mute-score").textContent = fmt(audio.match_score, 3);
   document.getElementById("mute-overlay").style.display = audio.muted ? "block" : "none";
+}
+
+function updateSolverText(solver) {
+  if (!solver) return;
+  document.getElementById("solver-roll").textContent = fmt(solver.roll_deg, 2);
+  document.getElementById("solver-pitch").textContent = fmt(solver.pitch_deg, 2);
+  document.getElementById("solver-residual").textContent = fmt(solver.residual_deg, 3);
 }
 
 // ---- Wave pattern mute controls ----
@@ -372,6 +393,36 @@ function drawCompass(heading) {
   const rad = (heading - 90) * Math.PI / 180;
   ctx.strokeStyle = "#5aa9ff"; ctx.beginPath(); ctx.moveTo(cx, cy);
   ctx.lineTo(cx + r * Math.cos(rad), cy + r * Math.sin(rad)); ctx.stroke();
+}
+
+// Standard artificial-horizon rendering: sky/ground split rotated by roll,
+// shifted by pitch, with a fixed aircraft-reference marker at center — the
+// usual way to visualize a complementary/Kalman-filter orientation output.
+function drawHorizon(rollDeg, pitchDeg) {
+  const [c, ctx] = canvasCtx("solver-horizon");
+  ctx.clearRect(0, 0, c.width, c.height);
+  const cx = c.width / 2, cy = c.height / 2;
+  const pitchPx = (pitchDeg / 90) * (c.height / 2);
+  ctx.save();
+  ctx.translate(cx, cy);
+  ctx.rotate(-rollDeg * Math.PI / 180);
+  ctx.fillStyle = "#1c3a5e";
+  ctx.fillRect(-c.width, -c.height - pitchPx, c.width * 2, c.height * 2);
+  ctx.fillStyle = "#3a2c1c";
+  ctx.fillRect(-c.width, -pitchPx, c.width * 2, c.height * 2);
+  ctx.strokeStyle = "#e6e9ef";
+  ctx.lineWidth = 2;
+  ctx.beginPath();
+  ctx.moveTo(-c.width, -pitchPx);
+  ctx.lineTo(c.width, -pitchPx);
+  ctx.stroke();
+  ctx.restore();
+  ctx.strokeStyle = "#ffcc00";
+  ctx.lineWidth = 2;
+  ctx.beginPath();
+  ctx.moveTo(cx - 20, cy); ctx.lineTo(cx - 6, cy);
+  ctx.moveTo(cx + 6, cy); ctx.lineTo(cx + 20, cy);
+  ctx.stroke();
 }
 
 function drawPolar(canvasId, angleDeg, patternFn) {

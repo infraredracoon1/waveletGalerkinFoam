@@ -27,7 +27,7 @@ try:
 except ImportError:  # pragma: no cover - optional dependency
     psutil = None
 
-app = FastAPI(title="Telemetry Dashboard Backend", version="1.5.0")
+app = FastAPI(title="Telemetry Dashboard Backend", version="1.6.0")
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
@@ -82,6 +82,48 @@ def cosine_similarity(a, b) -> float:
     a, b = np.asarray(a, dtype=float), np.asarray(b, dtype=float)
     denom = (np.linalg.norm(a) * np.linalg.norm(b)) + 1e-9
     return float(np.dot(a, b) / denom)
+
+
+# RAMPG Solver tab: a real sensor-fusion solver (complementary filter), not a
+# fabricated metric. Accelerometer alone gives an absolute but noisy tilt
+# estimate; gyroscope alone gives a smooth but drifting one (integration
+# error accumulates over time). The complementary filter blends gyro
+# integration (short-term) with the accelerometer's absolute reference
+# (long-term) to converge on a stable roll/pitch estimate — the standard
+# technique behind low-cost IMU/AHRS orientation sensing.
+SOLVER_STATE = {"roll": 0.0, "pitch": 0.0, "last_t": None}
+COMPLEMENTARY_ALPHA = 0.98
+
+
+def run_orientation_solver(accel: dict, gyro: dict, t: float) -> dict:
+    ax, ay, az = accel["x"], accel["y"], accel["z"]
+    roll_acc = math.degrees(math.atan2(ay, az))
+    pitch_acc = math.degrees(math.atan2(-ax, math.sqrt(ay * ay + az * az)))
+
+    last_t = SOLVER_STATE["last_t"]
+    dt = min(0.5, t - last_t) if last_t is not None else 0.0
+    SOLVER_STATE["last_t"] = t
+
+    roll_gyro = SOLVER_STATE["roll"] + gyro["x"] * dt
+    pitch_gyro = SOLVER_STATE["pitch"] + gyro["y"] * dt
+
+    alpha = COMPLEMENTARY_ALPHA
+    roll = alpha * roll_gyro + (1 - alpha) * roll_acc
+    pitch = alpha * pitch_gyro + (1 - alpha) * pitch_acc
+    # Disagreement between the two independent estimates -- what the filter
+    # is actively reconciling each tick; a genuine convergence/residual
+    # signal, not a placeholder number.
+    residual = abs(roll_acc - roll_gyro) + abs(pitch_acc - pitch_gyro)
+
+    SOLVER_STATE["roll"] = roll
+    SOLVER_STATE["pitch"] = pitch
+
+    return {
+        "roll_deg": round(roll, 3),
+        "pitch_deg": round(pitch, 3),
+        "residual_deg": round(residual, 4),
+        "alpha": alpha,
+    }
 
 
 def read_sensors() -> dict:
@@ -154,11 +196,14 @@ def read_sensors() -> dict:
         "match_score": score,
     }
 
+    solver = run_orientation_solver(accel, gyro, t)
+
     return {
         "timestamp": time.time(),
         "motion": {"accelerometer": accel, "gyroscope": gyro, "magnetometer": mag},
         "environment": {"barometer": baro, "light": light_sensor},
         "audio": audio,
+        "solver": solver,
     }
 
 
@@ -297,12 +342,16 @@ def export(format: str = "json"):
                 "audio_direction_deg",
                 "audio_muted",
                 "audio_match_score",
+                "solver_roll_deg",
+                "solver_pitch_deg",
+                "solver_residual_deg",
             ]
         )
         for h in rows:
             a, g, m = h["motion"]["accelerometer"], h["motion"]["gyroscope"], h["motion"]["magnetometer"]
             b, l = h["environment"]["barometer"], h["environment"]["light"]
             au = h["audio"]
+            sv = h.get("solver", {})
             writer.writerow(
                 [
                     h["timestamp"],
@@ -319,6 +368,9 @@ def export(format: str = "json"):
                     au["direction_deg"],
                     au.get("muted", False),
                     au.get("match_score", 0.0),
+                    sv.get("roll_deg", 0.0),
+                    sv.get("pitch_deg", 0.0),
+                    sv.get("residual_deg", 0.0),
                 ]
             )
         buf.seek(0)

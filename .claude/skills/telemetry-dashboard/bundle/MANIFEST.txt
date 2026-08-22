@@ -1,4 +1,4 @@
-Telemetry Dashboard Bundle v1.5.0
+Telemetry Dashboard Bundle v1.6.0
 ==================================
 
 File inventory (14 files):
@@ -38,6 +38,16 @@ Feature checklist
     "Docker build fails to reach PyPI/npm" troubleshooting note for why a sandboxed build
     may need proxy configuration that a normal host will not)
 [ ] iOS app: source written, NOT compiled or run (no macOS/Xcode toolchain available)
+[x] RAMPG Solver tab now includes a real orientation solver: a complementary filter
+    fusing accelerometer tilt (atan2) with integrated gyroscope rate into a roll/pitch
+    estimate, plus a genuine residual (the two independent estimates' disagreement
+    before blending). New `solver` field on /api/sensors and the WebSocket stream;
+    solver_roll_deg/solver_pitch_deg/solver_residual_deg added to CSV export. Frontend
+    renders a standard artificial-horizon visualization (sky/ground split by roll,
+    shifted by pitch) alongside the existing CPU/memory chart. Verified end-to-end in
+    a real browser: horizon renders, roll/pitch/residual update live: not a fabricated
+    metric, a well-known real sensor-fusion technique (same one used in low-cost
+    IMU/AHRS orientation sensing).
 [x] GitHub Pages deploy: CI (`.github/workflows/telemetry-dashboard.yml` at the repo root,
     NOT included in this zip -- it's specific to this repo's layout) actually runs the
     backend+frontend on every push and curl/WebSocket-tests the full API including the

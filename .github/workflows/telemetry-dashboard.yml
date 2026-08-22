@@ -86,9 +86,10 @@ jobs:
           async def main():
               async with websockets.connect("ws://localhost:8000/ws/sensors") as ws:
                   msg = json.loads(await asyncio.wait_for(ws.recv(), timeout=5))
-              for key in ("timestamp", "motion", "environment", "audio"):
+              for key in ("timestamp", "motion", "environment", "audio", "solver"):
                   assert key in msg, f"missing {key} in WS payload"
               assert "fft" in msg["audio"] and "muted" in msg["audio"]
+              assert "roll_deg" in msg["solver"] and "residual_deg" in msg["solver"]
               print("WS payload OK:", list(msg.keys()))
 
           asyncio.run(main())

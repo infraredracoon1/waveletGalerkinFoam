@@ -1,4 +1,4 @@
-# Telemetry Dashboard — Deployment Guide (v1.5.0)
+# Telemetry Dashboard — Deployment Guide (v1.6.0)
 
 A working implementation of the dashboard described in the skill's `SKILL.md`:
 a FastAPI backend, a zero-dependency HTML/JS dashboard frontend, Docker
@@ -153,6 +153,21 @@ ones. `POST /api/mute/clear` removes the reference and unmutes
 immediately. The iOS `SensorManager` mirrors `muted`/`match_score` from the
 WebSocket stream and exposes `captureMutePattern()` / `clearMutePattern()`
 (source-only, uncompiled — see Known limitations above).
+
+## Orientation solver (RAMPG Solver tab)
+
+Every `/api/sensors` / WebSocket reading includes a `solver` object:
+`{roll_deg, pitch_deg, residual_deg, alpha}`. It's produced by a real
+complementary filter — accelerometer tilt (`atan2` on x/y/z) blended with
+integrated gyroscope rate, weighted by `alpha` (0.98) toward the gyro
+short-term and the accelerometer long-term. `residual_deg` is the actual
+disagreement between the two independent estimates before blending — a
+genuine convergence signal, not a placeholder. The RAMPG Solver tab renders
+this as a standard artificial-horizon (sky/ground split rotated by roll,
+shifted by pitch) alongside the backend CPU/memory chart. This is a
+real, if simple, sensor-fusion algorithm connecting the accelerometer and
+gyroscope — the same technique used in low-cost IMU/AHRS orientation
+sensing, not a fabricated number.
 
 ## Troubleshooting
 
