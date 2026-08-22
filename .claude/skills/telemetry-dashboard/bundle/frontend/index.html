@@ -55,7 +55,12 @@
 <body>
 <header>
   <h1>📡 Telemetry Dashboard</h1>
-  <div><span id="status-dot"></span><span id="status-text">connecting…</span></div>
+  <div style="display:flex; align-items:center; gap:10px;">
+    <input id="backend-input" type="text" placeholder="http://host:8000"
+           style="background:#0b0e14; border:1px solid #262c3a; color:#fff; padding:4px 8px; border-radius:4px; width:220px; font-size:12px;" />
+    <button class="action" id="backend-connect" style="margin:0; padding:5px 10px; font-size:12px;">Connect</button>
+    <span><span id="status-dot"></span><span id="status-text">connecting…</span></span>
+  </div>
 </header>
 <nav id="tabs"></nav>
 <main>
@@ -147,9 +152,47 @@
 </main>
 
 <script>
-window.TELEMETRY_BACKEND = window.TELEMETRY_BACKEND || (location.hostname ? "http://" + location.hostname + ":8000" : "http://localhost:8000");
-const BACKEND = window.TELEMETRY_BACKEND;
-const WS_URL = BACKEND.replace(/^http/, "ws") + "/ws/sensors";
+// Backend URL resolution order: ?backend= query param > remembered localStorage
+// value > window.TELEMETRY_BACKEND (settable before this script runs) > a same-host
+// :8000 guess. This lets a statically-hosted copy of this page (e.g. GitHub Pages,
+// which cannot itself run the Python backend) point at a backend running anywhere.
+function resolveBackend() {
+  const fromQuery = new URLSearchParams(location.search).get("backend");
+  if (fromQuery) return fromQuery;
+  const remembered = localStorage.getItem("telemetry_backend");
+  if (remembered) return remembered;
+  if (window.TELEMETRY_BACKEND) return window.TELEMETRY_BACKEND;
+  return location.hostname ? "http://" + location.hostname + ":8000" : "http://localhost:8000";
+}
+function wsUrlFor(backend) { return backend.replace(/^http/, "ws") + "/ws/sensors"; }
+
+let BACKEND = resolveBackend();
+let WS_URL = wsUrlFor(BACKEND);
+let connGen = 0;
+let currentWs = null;
+let failCount = 0;
+
+document.getElementById("backend-input").value = BACKEND;
+document.getElementById("backend-connect").onclick = () => {
+  const v = document.getElementById("backend-input").value.trim();
+  if (!v) return;
+  setBackend(v);
+};
+document.getElementById("backend-input").addEventListener("keydown", (e) => {
+  if (e.key === "Enter") document.getElementById("backend-connect").click();
+});
+
+function setBackend(url) {
+  BACKEND = url.replace(/\/+$/, "");
+  WS_URL = wsUrlFor(BACKEND);
+  localStorage.setItem("telemetry_backend", BACKEND);
+  connGen++;
+  failCount = 0;
+  if (currentWs) { try { currentWs.close(); } catch (e) {} }
+  connect(connGen);
+  pollHealth();
+  refreshMuteStatus();
+}
 
 const TABS = [
   ["telemetry", "Telemetry"], ["audio", "Audio"], ["motion", "Motion"],
@@ -206,12 +249,27 @@ const statusText = document.getElementById("status-text");
 const constHistory = [];
 const waveHistory = [];
 
-function connect() {
+function connect(gen) {
   const ws = new WebSocket(WS_URL);
-  ws.onopen = () => { statusDot.classList.add("live"); statusText.textContent = "live"; };
-  ws.onclose = () => { statusDot.classList.remove("live"); statusText.textContent = "disconnected — retrying…"; setTimeout(connect, 1500); };
+  currentWs = ws;
+  ws.onopen = () => {
+    if (gen !== connGen) return;
+    failCount = 0;
+    statusDot.classList.add("live");
+    statusText.textContent = "live";
+  };
+  ws.onclose = () => {
+    if (gen !== connGen) return; // superseded by a newer setBackend() call
+    statusDot.classList.remove("live");
+    failCount++;
+    statusText.textContent = failCount >= 3
+      ? "no backend reachable — enter a URL above and click Connect"
+      : "disconnected — retrying…";
+    setTimeout(() => connect(gen), 1500);
+  };
   ws.onerror = () => ws.close();
   ws.onmessage = (ev) => {
+    if (gen !== connGen) return;
     const d = JSON.parse(ev.data);
     updateMotion(d.motion, d.environment);
     updateAudio(d.audio);
@@ -221,7 +279,7 @@ function connect() {
     updateWave(d.audio.direction_deg);
   };
 }
-connect();
+connect(connGen);
 
 function updateMotion(motion, env) {
   const { accelerometer: a, gyroscope: g, magnetometer: m } = motion;

@@ -1,4 +1,4 @@
-# Telemetry Dashboard — Deployment Guide (v1.2.0)
+# Telemetry Dashboard — Deployment Guide (v1.3.0)
 
 A working implementation of the dashboard described in the skill's `SKILL.md`:
 a FastAPI backend, a zero-dependency HTML/JS dashboard frontend, Docker
@@ -21,6 +21,43 @@ configs, and iOS source stubs.
   real backend CPU/memory performance panel (driven by `/health` polling),
   since that's the genuine telemetry this bundle has to show — not a
   fabricated metric.
+- **GitHub Pages hosts the frontend only.** Pages serves static files; it
+  cannot run the Python backend or hold the WebSocket connection open. See
+  "Deploy the frontend to GitHub Pages" below for how the page handles that.
+
+## Deploy the frontend to GitHub Pages
+
+`.github/workflows/telemetry-dashboard.yml` (repo root) does two things on
+every push that touches this bundle:
+
+1. **`test` job** — actually installs the backend's dependencies, starts
+   `uvicorn` and the Node static server for real on the runner, then curls
+   every REST endpoint (health, sensors, stats, calibrate, export, and the
+   full wave-pattern-mute flow: capture → confirms muted → clear → confirms
+   unmuted → threshold config) and opens the `/ws/sensors` WebSocket with a
+   short Python script to confirm it streams a valid reading. This is a real
+   run of the app, not just a build check.
+2. **`deploy` job** (runs after `test` passes) — copies `frontend/index.html`
+   through `.github/scripts/optimize-frontend.mjs` (strips HTML comments and
+   excess whitespace; conservative on purpose — this page is ~19KB and Pages
+   already serves it gzipped, so there's little to gain from aggressive
+   minification) and publishes it to GitHub Pages.
+
+**One-time manual step required** (no API in this toolchain can do this for
+you): in the repo's **Settings → Pages**, set **Source** to **GitHub
+Actions**. After that, every push runs the workflow above and the site
+updates automatically at the URL GitHub shows on that same settings page.
+
+**Since Pages can't run the backend**, the deployed page starts with no
+reachable backend and shows "no backend reachable" instead of hanging on
+"connecting…". Run the backend anywhere it can be reached from the browser
+(natively, Docker, a host like Render/Fly.io/Railway) and point the deployed
+page at it either:
+
+- by URL: `https://<user>.github.io/<repo>/?backend=https://your-backend-host:8000`, or
+- by typing the backend URL into the field next to the connection status in
+  the page header and clicking **Connect** (remembered in that browser via
+  `localStorage` for next time).
 
 ## Run natively
 

@@ -1,0 +1,142 @@
+name: Telemetry Dashboard — test & deploy
+
+on:
+  push:
+    branches: [main, claude/new-session-6utnvq]
+    paths:
+      - ".claude/skills/telemetry-dashboard/bundle/**"
+      - ".github/workflows/telemetry-dashboard.yml"
+      - ".github/scripts/optimize-frontend.mjs"
+  workflow_dispatch: {}
+
+permissions:
+  contents: read
+
+concurrency:
+  group: telemetry-dashboard-pages
+  cancel-in-progress: false
+
+jobs:
+  test:
+    name: Run backend + frontend and exercise the API
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: .claude/skills/telemetry-dashboard/bundle
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      - name: Install backend dependencies
+        run: pip install -r backend/requirements.txt
+
+      - name: Start backend
+        run: |
+          cd backend
+          nohup uvicorn main:app --host 0.0.0.0 --port 8000 > backend.log 2>&1 &
+          for i in $(seq 1 30); do
+            curl -sf http://localhost:8000/health > /dev/null && exit 0
+            sleep 0.5
+          done
+          echo "backend did not become healthy" && cat backend.log && exit 1
+
+      - name: Start frontend
+        run: |
+          cd frontend
+          nohup node server.js > frontend.log 2>&1 &
+          for i in $(seq 1 30); do
+            curl -sf -o /dev/null http://localhost:3000/ && exit 0
+            sleep 0.5
+          done
+          echo "frontend did not come up" && cat frontend.log && exit 1
+
+      - name: Exercise the REST + export API
+        run: |
+          set -euo pipefail
+          curl -sf http://localhost:8000/health | tee /dev/stderr | grep -q '"status":"healthy"'
+          curl -sf http://localhost:8000/api/sensors | tee /dev/stderr | grep -q '"timestamp"'
+          curl -sf http://localhost:8000/api/stats > /dev/null
+          curl -sf -X POST "http://localhost:8000/api/calibrate?sensor=accelerometer" > /dev/null
+          curl -sf "http://localhost:8000/api/export?format=csv" | head -1 | grep -q '^timestamp,'
+
+      - name: Exercise the wave-pattern-match mute flow
+        run: |
+          set -euo pipefail
+          curl -sf http://localhost:8000/api/mute/status | grep -q '"has_target":false'
+          curl -sf -X POST http://localhost:8000/api/mute/capture | grep -q '"has_target":true'
+          sleep 1
+          curl -sf http://localhost:8000/api/sensors | grep -q '"muted":true'
+          curl -sf -X POST http://localhost:8000/api/mute/clear | grep -q '"muted":false'
+          curl -sf -X POST "http://localhost:8000/api/mute/config?threshold=0.75" | grep -q '"threshold":0.75'
+
+      - name: Check the WebSocket stream produces a valid reading
+        run: |
+          pip install --quiet websockets
+          python3 - <<'EOF'
+          import asyncio, json
+          import websockets
+
+          async def main():
+              async with websockets.connect("ws://localhost:8000/ws/sensors") as ws:
+                  msg = json.loads(await asyncio.wait_for(ws.recv(), timeout=5))
+              for key in ("timestamp", "motion", "environment", "audio"):
+                  assert key in msg, f"missing {key} in WS payload"
+              assert "fft" in msg["audio"] and "muted" in msg["audio"]
+              print("WS payload OK:", list(msg.keys()))
+
+          asyncio.run(main())
+          EOF
+
+      - name: Upload server logs on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: server-logs
+          path: |
+            .claude/skills/telemetry-dashboard/bundle/backend/backend.log
+            .claude/skills/telemetry-dashboard/bundle/frontend/frontend.log
+
+  deploy:
+    name: Deploy optimized frontend to GitHub Pages
+    needs: test
+    if: github.event_name != 'pull_request'
+    runs-on: ubuntu-latest
+    permissions:
+      pages: write
+      id-token: write
+      contents: read
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      - name: Build optimized static site
+        run: |
+          mkdir -p dist
+          node .github/scripts/optimize-frontend.mjs \
+            .claude/skills/telemetry-dashboard/bundle/frontend/index.html \
+            dist/index.html
+
+      - name: Configure Pages
+        uses: actions/configure-pages@v5
+
+      - name: Upload Pages artifact
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: dist
+
+      - name: Deploy to GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v4

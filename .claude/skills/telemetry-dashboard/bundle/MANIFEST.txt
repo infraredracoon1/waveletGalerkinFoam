@@ -1,4 +1,4 @@
-Telemetry Dashboard Bundle v1.2.0
+Telemetry Dashboard Bundle v1.3.0
 ==================================
 
 File inventory (12 files):
@@ -35,6 +35,16 @@ Feature checklist
     "Docker build fails to reach PyPI/npm" troubleshooting note for why a sandboxed build
     may need proxy configuration that a normal host will not)
 [ ] iOS app: source written, NOT compiled or run (no macOS/Xcode toolchain available)
+[x] GitHub Pages deploy: CI (`.github/workflows/telemetry-dashboard.yml` at the repo root,
+    NOT included in this zip — it's specific to this repo's layout) actually runs the
+    backend+frontend on every push and curl/WebSocket-tests the full API including the
+    mute flow before publishing an optimized copy of the frontend to Pages. Frontend gained
+    a backend-URL field + ?backend= query param + localStorage memory + a clear "no backend
+    reachable" state (replacing an infinite "connecting..." spinner), since Pages can only
+    host the static frontend, not the Python backend. Verified locally: unreachable state
+    renders correctly, and switching the field to a live backend goes "live" immediately.
+    One manual step remains that no tool here can perform: enable Settings -> Pages ->
+    Source -> GitHub Actions once, on GitHub itself.
 
 System requirements
 --------------------
