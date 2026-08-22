@@ -27,7 +27,7 @@ try:
 except ImportError:  # pragma: no cover - optional dependency
     psutil = None
 
-app = FastAPI(title="Telemetry Dashboard Backend", version="1.4.0")
+app = FastAPI(title="Telemetry Dashboard Backend", version="1.5.0")
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],

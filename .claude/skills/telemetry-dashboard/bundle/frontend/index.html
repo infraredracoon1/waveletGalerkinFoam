@@ -208,11 +208,29 @@ TABS.forEach(([id, label], i) => {
   if (i === 0) btn.classList.add("active");
   tabsEl.appendChild(btn);
 });
+let activeTab = "telemetry";
+let lastMotion = null, lastEnvironment = null, lastAudio = null;
+
 function selectTab(id) {
+  activeTab = id;
   document.querySelectorAll("nav button").forEach(b => b.classList.toggle("active", b.dataset.tab === id));
   document.querySelectorAll(".tab").forEach(s => s.classList.toggle("active", s.id === "tab-" + id));
+  renderActiveTabCanvas(); // redraw immediately from cached data so the just-opened tab isn't stale
 }
 selectTab("telemetry");
+
+// Perf optimization: canvas redraws are real work (clear + redraw on every WS tick,
+// up to 60/sec). Only the tab actually on screen needs its canvas(es) current: text
+// fields stay live everywhere (cheap), but drawing is gated to the active tab and
+// replayed from cached data the instant you switch tabs.
+function renderActiveTabCanvas() {
+  if (activeTab === "motion" && lastMotion) { drawTilt(lastMotion.accelerometer); drawCompass(lastMotion.magnetometer.heading); }
+  else if (activeTab === "audio" && lastAudio) drawFFT(lastAudio.fft);
+  else if (activeTab === "beamform" && lastAudio) updateBeamform(lastAudio.direction_deg);
+  else if (activeTab === "hyper" && lastAudio) updateHypercardioid(lastAudio.direction_deg);
+  else if (activeTab === "constellations" && lastAudio) updateConstellations(lastAudio.fft);
+  else if (activeTab === "wave" && lastAudio) updateWave(lastAudio.direction_deg);
+}
 
 function fmt(n, d = 2) { return typeof n === "number" ? n.toFixed(d) : "-"; }
 
@@ -271,29 +289,25 @@ function connect(gen) {
   ws.onmessage = (ev) => {
     if (gen !== connGen) return;
     const d = JSON.parse(ev.data);
-    updateMotion(d.motion, d.environment);
-    updateAudio(d.audio);
-    updateBeamform(d.audio.direction_deg);
-    updateHypercardioid(d.audio.direction_deg);
-    updateConstellations(d.audio.fft);
-    updateWave(d.audio.direction_deg);
+    lastMotion = d.motion; lastEnvironment = d.environment; lastAudio = d.audio;
+    updateMotionText(d.motion, d.environment);
+    updateAudioText(d.audio);
+    renderActiveTabCanvas();
   };
 }
 connect(connGen);
 
-function updateMotion(motion, env) {
+function updateMotionText(motion, env) {
   const { accelerometer: a, gyroscope: g, magnetometer: m } = motion;
   document.getElementById("m-accel").textContent = `x: ${fmt(a.x,3)} y: ${fmt(a.y,3)} z: ${fmt(a.z,3)}`;
   document.getElementById("m-gyro").textContent = `x: ${fmt(g.x)} y: ${fmt(g.y)} z: ${fmt(g.z)}`;
   document.getElementById("m-mag").textContent = `heading: ${fmt(m.heading,1)}°`;
   document.getElementById("m-env").textContent = `barometer: ${fmt(env.barometer.pressure_kpa,2)} kPa (${fmt(env.barometer.altitude_m,1)} m) | light: ${fmt(env.light.lux,0)} lux`;
-  drawTilt(a); drawCompass(m.heading);
 }
 
-function updateAudio(audio) {
+function updateAudioText(audio) {
   document.getElementById("audio-rms").textContent = fmt(audio.rms, 4);
   document.getElementById("audio-freq").innerHTML = fmt(audio.dominant_freq_hz, 1) + "<small> Hz</small>";
-  drawFFT(audio.fft);
   document.getElementById("mute-score").textContent = fmt(audio.match_score, 3);
   document.getElementById("mute-overlay").style.display = audio.muted ? "block" : "none";
 }

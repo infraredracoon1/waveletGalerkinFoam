@@ -1,4 +1,4 @@
-# Telemetry Dashboard — Deployment Guide (v1.4.0)
+# Telemetry Dashboard — Deployment Guide (v1.5.0)
 
 A working implementation of the dashboard described in the skill's `SKILL.md`:
 a FastAPI backend, a zero-dependency HTML/JS dashboard frontend, Docker

@@ -1,4 +1,4 @@
-Telemetry Dashboard Bundle v1.4.0
+Telemetry Dashboard Bundle v1.5.0
 ==================================
 
 File inventory (14 files):
@@ -54,6 +54,15 @@ Feature checklist
     Commercial use and independent research use are both explicitly fine under these
     licenses. Base44's Terms of Service and Apple's Developer Agreement are flagged as
     separate platform-ToS matters outside what any tool here can review or agree to.
+[x] Frontend perf optimization: canvas redraws (audio spectrum, tilt/compass, beamform/
+    hypercardioid polar plots, constellations heatmap, wave trail) used to run for all 9
+    tabs on every WebSocket tick regardless of which was visible. Now gated to only the
+    active tab -- cheap text fields (accel/gyro/heading/env/rms/freq/mute score) still
+    update everywhere, but canvas work only happens for the tab on screen, replayed
+    instantly from cached data on tab switch so nothing looks stale. Verified in a real
+    browser across all 9 tabs after the change: every tab still renders live data
+    correctly, canvas pixels confirmed non-blank immediately after switching tabs, no
+    console errors.
 
 System requirements
 --------------------
