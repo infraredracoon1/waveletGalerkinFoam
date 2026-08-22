@@ -55,12 +55,23 @@ every push that touches this bundle:
    through `.github/scripts/optimize-frontend.mjs` (strips HTML comments and
    excess whitespace; conservative on purpose — this page is ~19KB and Pages
    already serves it gzipped, so there's little to gain from aggressive
-   minification) and publishes it to GitHub Pages.
+   minification), then publishes it with a plain `git push` to a `gh-pages`
+   branch.
+
+   This bundle originally used the "Actions" Pages source
+   (`actions/configure-pages` + `actions/deploy-pages`), but every attempt
+   failed with `Resource not accessible by integration` when the action
+   tried to *create* the Pages site — this repo's default `GITHUB_TOKEN`
+   doesn't have permission for that call, regardless of the job's declared
+   `pages: write` permission. Pushing to a `gh-pages` branch sidesteps it
+   entirely: it only needs `contents: write`, which the token already has.
 
 **One-time manual step required** (no API in this toolchain can do this for
-you): in the repo's **Settings → Pages**, set **Source** to **GitHub
-Actions**. After that, every push runs the workflow above and the site
-updates automatically at the URL GitHub shows on that same settings page.
+you): in the repo's **Settings → Pages**, set **Source** to **Deploy from a
+branch**, branch **`gh-pages`**, folder **`/ (root)`**, and save. After
+that, every push runs the workflow above and the site updates automatically
+at the URL GitHub shows on that same settings page (typically
+`https://<user>.github.io/<repo>/`).
 
 **Since Pages can't run the backend**, the deployed page starts with no
 reachable backend and shows "no backend reachable" instead of hanging on

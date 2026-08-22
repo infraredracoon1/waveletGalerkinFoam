@@ -104,19 +104,16 @@ jobs:
             .claude/skills/telemetry-dashboard/bundle/frontend/frontend.log
 
   deploy:
-    name: Deploy optimized frontend to GitHub Pages
+    name: Deploy optimized frontend to GitHub Pages (git-based)
     needs: test
     if: github.event_name != 'pull_request'
     runs-on: ubuntu-latest
     permissions:
-      pages: write
-      id-token: write
-      contents: read
-    environment:
-      name: github-pages
-      url: ${{ steps.deployment.outputs.page_url }}
+      contents: write
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
       - uses: actions/setup-node@v4
         with:
@@ -128,20 +125,39 @@ jobs:
           node .github/scripts/optimize-frontend.mjs \
             .claude/skills/telemetry-dashboard/bundle/frontend/index.html \
             dist/index.html
+          touch dist/.nojekyll
 
-      - name: Configure Pages
-        uses: actions/configure-pages@v5
-        with:
-          # Auto-create the Pages site via the API if it doesn't exist yet,
-          # instead of relying solely on the repo's Settings -> Pages UI
-          # (which several manual attempts didn't get to stick).
-          enablement: true
+      # actions/configure-pages + actions/deploy-pages (the "Actions" Pages
+      # source) require the default GITHUB_TOKEN to be able to *create* a
+      # Pages site, which this repo's token permissions don't allow --
+      # "Resource not accessible by integration" on every attempt. A plain
+      # git push to a gh-pages branch sidesteps that: it only needs
+      # contents: write, which the token already has (this is the same
+      # push mechanism used throughout this session). Requires Settings ->
+      # Pages -> Source -> "Deploy from a branch" -> gh-pages -> / (root),
+      # set once by a repo admin -- no tool here can flip that setting.
+      - name: Publish to gh-pages branch via git
+        run: |
+          set -euo pipefail
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
 
-      - name: Upload Pages artifact
-        uses: actions/upload-pages-artifact@v3
-        with:
-          path: dist
+          if git ls-remote --exit-code --heads origin gh-pages > /dev/null 2>&1; then
+            git fetch origin gh-pages
+            git worktree add -B gh-pages gh-pages-deploy origin/gh-pages
+          else
+            git worktree add --orphan -b gh-pages gh-pages-deploy
+          fi
 
-      - name: Deploy to GitHub Pages
-        id: deployment
-        uses: actions/deploy-pages@v4
+          find gh-pages-deploy -mindepth 1 -maxdepth 1 -not -name ".git" -exec rm -rf {} +
+          cp dist/index.html gh-pages-deploy/index.html
+          cp dist/.nojekyll gh-pages-deploy/.nojekyll
+
+          cd gh-pages-deploy
+          git add -A
+          if git diff --cached --quiet; then
+            echo "No changes to deploy."
+          else
+            git commit -m "Deploy telemetry dashboard frontend (${{ github.sha }})"
+            git push origin HEAD:gh-pages
+          fi

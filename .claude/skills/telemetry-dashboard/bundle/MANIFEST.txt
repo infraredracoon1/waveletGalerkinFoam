@@ -39,15 +39,21 @@ Feature checklist
     may need proxy configuration that a normal host will not)
 [ ] iOS app: source written, NOT compiled or run (no macOS/Xcode toolchain available)
 [x] GitHub Pages deploy: CI (`.github/workflows/telemetry-dashboard.yml` at the repo root,
-    NOT included in this zip — it's specific to this repo's layout) actually runs the
+    NOT included in this zip -- it's specific to this repo's layout) actually runs the
     backend+frontend on every push and curl/WebSocket-tests the full API including the
-    mute flow before publishing an optimized copy of the frontend to Pages. Frontend gained
-    a backend-URL field + ?backend= query param + localStorage memory + a clear "no backend
+    mute flow before publishing an optimized copy of the frontend. Frontend gained a
+    backend-URL field + ?backend= query param + localStorage memory + a clear "no backend
     reachable" state (replacing an infinite "connecting..." spinner), since Pages can only
     host the static frontend, not the Python backend. Verified locally: unreachable state
     renders correctly, and switching the field to a live backend goes "live" immediately.
-    One manual step remains that no tool here can perform: enable Settings -> Pages ->
-    Source -> GitHub Actions once, on GitHub itself.
+    Deploy mechanism switched from the Actions Pages source (actions/configure-pages +
+    deploy-pages) to a plain `git push` to a `gh-pages` branch, after every attempt at the
+    former failed with "Resource not accessible by integration" trying to create the Pages
+    site -- a repo-level token permission limit, not something fixable in the workflow. The
+    gh-pages branch has already been pushed once by hand and the git-worktree logic the CI
+    job uses was dry-run tested against a real clone of this repo. One manual step remains
+    that no tool here can perform: Settings -> Pages -> Source -> "Deploy from a branch" ->
+    gh-pages -> / (root), once, on GitHub itself.
 [x] Licensing audit: this bundle's own code is MIT (LICENSE); every actual dependency
     (FastAPI, Starlette, Uvicorn, Pydantic, NumPy, psutil, the GitHub Actions used) verified
     MIT/BSD-3-Clause against installed package metadata -- see THIRD_PARTY_LICENSES.md.
