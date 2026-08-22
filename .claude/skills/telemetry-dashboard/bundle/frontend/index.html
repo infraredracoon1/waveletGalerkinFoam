@@ -45,6 +45,11 @@
   }
   input[type=number] { background: #0b0e14; border: 1px solid #262c3a; color: #fff; padding: 4px 8px; border-radius: 4px; width: 90px; }
   .note { color: #8891a3; font-size: 12px; margin-top: 6px; }
+  .mute-overlay {
+    position: absolute; top: 40px; left: 14px; right: 14px;
+    background: rgba(255, 107, 107, 0.12); border: 1px solid #ff6b6b; color: #ff9b9b;
+    padding: 6px 10px; border-radius: 6px; font-size: 13px; font-weight: 600;
+  }
 </style>
 </head>
 <body>
@@ -69,12 +74,26 @@
 
   <section id="tab-audio" class="tab">
     <div class="grid">
-      <div class="card" style="grid-column: 1 / -1;">
+      <div class="card" style="grid-column: 1 / -1; position: relative;">
         <h3>Frequency Spectrum</h3>
         <canvas id="audio-fft" height="160"></canvas>
+        <div id="mute-overlay" class="mute-overlay" style="display:none;">🔇 MUTED — wave pattern matched</div>
       </div>
       <div class="card"><h3>RMS Level</h3><div class="metric" id="audio-rms">-</div></div>
       <div class="card"><h3>Dominant Frequency</h3><div class="metric" id="audio-freq">-</div></div>
+      <div class="card">
+        <h3>Wave Pattern Mute</h3>
+        <div style="margin-bottom:8px;">Match score: <span id="mute-score">-</span> / threshold <span id="mute-threshold-val">-</span></div>
+        <button class="action" id="mute-capture">Capture Pattern</button>
+        <button class="action" id="mute-clear">Clear Pattern</button>
+        <div style="margin-top:6px;">
+          <label>Threshold <input type="number" id="mute-threshold" min="0" max="1" step="0.01" /></label>
+          <button class="action" id="mute-apply-threshold" style="margin-left:8px;">Apply</button>
+        </div>
+        <div class="note">Captures the current FFT shape as a reference. Whenever the live
+          signal's cosine similarity to that reference reaches the threshold, the audio
+          channel is muted (zeroed) until the signal drifts away from the pattern again.</div>
+      </div>
     </div>
   </section>
 
@@ -217,7 +236,34 @@ function updateAudio(audio) {
   document.getElementById("audio-rms").textContent = fmt(audio.rms, 4);
   document.getElementById("audio-freq").innerHTML = fmt(audio.dominant_freq_hz, 1) + "<small> Hz</small>";
   drawFFT(audio.fft);
+  document.getElementById("mute-score").textContent = fmt(audio.match_score, 3);
+  document.getElementById("mute-overlay").style.display = audio.muted ? "block" : "none";
 }
+
+// ---- Wave pattern mute controls ----
+async function refreshMuteStatus() {
+  try {
+    const r = await fetch(BACKEND + "/api/mute/status");
+    const s = await r.json();
+    document.getElementById("mute-threshold").value = s.threshold;
+    document.getElementById("mute-threshold-val").textContent = fmt(s.threshold, 2);
+  } catch (e) { /* backend not reachable yet */ }
+}
+refreshMuteStatus();
+
+document.getElementById("mute-capture").onclick = async () => {
+  await fetch(BACKEND + "/api/mute/capture", { method: "POST" });
+  refreshMuteStatus();
+};
+document.getElementById("mute-clear").onclick = async () => {
+  await fetch(BACKEND + "/api/mute/clear", { method: "POST" });
+  refreshMuteStatus();
+};
+document.getElementById("mute-apply-threshold").onclick = async () => {
+  const t = document.getElementById("mute-threshold").value;
+  await fetch(BACKEND + "/api/mute/config?threshold=" + encodeURIComponent(t), { method: "POST" });
+  refreshMuteStatus();
+};
 
 function canvasCtx(id) {
   const c = document.getElementById(id);

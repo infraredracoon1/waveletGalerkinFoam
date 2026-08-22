@@ -1,4 +1,4 @@
-Telemetry Dashboard Bundle v1.1.0
+Telemetry Dashboard Bundle v1.2.0
 ==================================
 
 File inventory (12 files):
@@ -23,6 +23,12 @@ Feature checklist
 [x] WebSocket streaming: /ws/sensors
 [x] 9 dashboard tabs, all driven by live backend data (verified in a real browser)
 [x] JSON/CSV export
+[x] Wave pattern matching -> mute: capture a reference FFT, cosine-similarity match every
+    tick, mute (zero) the audio channel on match. REST: /api/mute/{status,capture,clear,
+    config}. Frontend: Audio tab "Wave Pattern Mute" panel with live overlay. iOS: mirrored
+    in SensorManager (muted/matchScore, captureMutePattern()/clearMutePattern()) — source
+    only, same caveat as the rest of the iOS app. Verified end-to-end in a real browser:
+    capture -> mute engaged (spectrum + RMS zeroed, overlay shown) -> clear -> unmuted.
 [x] Native launch verified: pip install, uvicorn + node servers started, endpoints curl-tested
 [x] Docker images verified to build and run correctly (tested with a temporary sandbox-only
     proxy/CA config; the shipped Dockerfiles are plain and unmodified — see README's

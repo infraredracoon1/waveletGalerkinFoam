@@ -1,4 +1,4 @@
-# Telemetry Dashboard — Deployment Guide (v1.1.0)
+# Telemetry Dashboard — Deployment Guide (v1.2.0)
 
 A working implementation of the dashboard described in the skill's `SKILL.md`:
 a FastAPI backend, a zero-dependency HTML/JS dashboard frontend, Docker
@@ -71,8 +71,26 @@ Export tab.
 | POST | `/api/calibrate?sensor=accelerometer\|magnetometer\|barometer` | Simulated calibration |
 | GET | `/api/config` | Current runtime config |
 | POST | `/api/config?updateRate=...&sampleRate=...&fftSize=...` | Update runtime config |
+| GET | `/api/mute/status` | Wave pattern match state: has_target, threshold, muted, score |
+| POST | `/api/mute/capture` | Capture the current audio FFT as the reference pattern |
+| POST | `/api/mute/clear` | Clear the reference pattern and unmute |
+| POST | `/api/mute/config?threshold=0.9` | Set the match threshold (0-1 cosine similarity) |
 | GET | `/api/export?format=json\|csv` | Export accumulated history |
 | WS | `/ws/sensors` | Streams one JSON reading per tick |
+
+## Wave pattern matching → mute
+
+The Audio tab can capture the current FFT shape as a reference pattern
+(`POST /api/mute/capture`). On every subsequent tick, the backend computes
+the cosine similarity between the live FFT and that reference; once the
+score reaches the configured threshold (default 0.9), the audio channel
+(`fft` and `rms` in `/api/sensors` and the WebSocket stream) is muted —
+zeroed out — until the live signal drifts away from the captured pattern.
+This is a pattern-triggered noise gate: it mutes matching sounds, not loud
+ones. `POST /api/mute/clear` removes the reference and unmutes
+immediately. The iOS `SensorManager` mirrors `muted`/`match_score` from the
+WebSocket stream and exposes `captureMutePattern()` / `clearMutePattern()`
+(source-only, uncompiled — see Known limitations above).
 
 ## Troubleshooting
 

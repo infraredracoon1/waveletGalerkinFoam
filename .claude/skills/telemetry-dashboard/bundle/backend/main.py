@@ -27,7 +27,7 @@ try:
 except ImportError:  # pragma: no cover - optional dependency
     psutil = None
 
-app = FastAPI(title="Telemetry Dashboard Backend", version="1.1.0")
+app = FastAPI(title="Telemetry Dashboard Backend", version="1.2.0")
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
@@ -65,6 +65,23 @@ SENSOR_STATUS = {
         "light",
     ]
 }
+
+# Wave pattern matching -> mute: capture a reference FFT shape, then compare
+# every subsequent tick against it (cosine similarity). A close enough match
+# (score >= threshold) mutes the audio channel in the outgoing payload — a
+# pattern-triggered noise gate rather than a simple volume threshold.
+PATTERN_MATCH = {
+    "target": None,  # list[float] | None — captured reference FFT
+    "threshold": 0.9,
+    "muted": False,
+    "score": 0.0,
+}
+
+
+def cosine_similarity(a, b) -> float:
+    a, b = np.asarray(a, dtype=float), np.asarray(b, dtype=float)
+    denom = (np.linalg.norm(a) * np.linalg.norm(b)) + 1e-9
+    return float(np.dot(a, b) / denom)
 
 
 def read_sensors() -> dict:
@@ -119,11 +136,22 @@ def read_sensors() -> dict:
     corr = np.correlate(samples_a - samples_a.mean(), samples_b - samples_b.mean(), mode="full")
     lag = int(np.argmax(corr) - (n - 1))
     direction_deg = round(max(-90.0, min(90.0, lag * 4.0)), 1)
+
+    muted = False
+    score = 0.0
+    if PATTERN_MATCH["target"] is not None:
+        score = round(cosine_similarity(fft_mag, PATTERN_MATCH["target"]), 4)
+        muted = score >= PATTERN_MATCH["threshold"]
+    PATTERN_MATCH["muted"] = muted
+    PATTERN_MATCH["score"] = score
+
     audio = {
-        "fft": fft_mag,
-        "rms": round(rms, 4),
+        "fft": [0.0] * len(fft_mag) if muted else fft_mag,
+        "rms": 0.0 if muted else round(rms, 4),
         "direction_deg": direction_deg,
         "dominant_freq_hz": round(freq1, 1),
+        "muted": muted,
+        "match_score": score,
     }
 
     return {
@@ -188,6 +216,45 @@ def calibrate(sensor: str = Query("accelerometer")):
     return {"sensor": sensor, "status": "calibrated", "calibration": CALIBRATION.get(sensor)}
 
 
+@app.get("/api/mute/status")
+def mute_status():
+    return {
+        "has_target": PATTERN_MATCH["target"] is not None,
+        "threshold": PATTERN_MATCH["threshold"],
+        "muted": PATTERN_MATCH["muted"],
+        "score": PATTERN_MATCH["score"],
+    }
+
+
+@app.post("/api/mute/capture")
+def mute_capture():
+    """Capture the current audio FFT as the reference pattern to match against."""
+    reading = read_sensors()
+    PATTERN_MATCH["target"] = reading["audio"]["fft"] if not reading["audio"]["muted"] else None
+    if PATTERN_MATCH["target"] is None:
+        # already-muted signal has a zeroed fft; re-sample once more so we
+        # capture the real waveform, not the silence.
+        reading = read_sensors()
+        PATTERN_MATCH["target"] = reading["audio"]["fft"]
+    PATTERN_MATCH["muted"] = False
+    PATTERN_MATCH["score"] = 0.0
+    return mute_status()
+
+
+@app.post("/api/mute/clear")
+def mute_clear():
+    PATTERN_MATCH["target"] = None
+    PATTERN_MATCH["muted"] = False
+    PATTERN_MATCH["score"] = 0.0
+    return mute_status()
+
+
+@app.post("/api/mute/config")
+def mute_config(threshold: float = Query(..., ge=0.0, le=1.0)):
+    PATTERN_MATCH["threshold"] = threshold
+    return mute_status()
+
+
 @app.get("/api/config")
 def get_config():
     return CONFIG
@@ -228,6 +295,8 @@ def export(format: str = "json"):
                 "lux",
                 "audio_rms",
                 "audio_direction_deg",
+                "audio_muted",
+                "audio_match_score",
             ]
         )
         for h in rows:
@@ -248,6 +317,8 @@ def export(format: str = "json"):
                     l["lux"],
                     au["rms"],
                     au["direction_deg"],
+                    au.get("muted", False),
+                    au.get("match_score", 0.0),
                 ]
             )
         buf.seek(0)

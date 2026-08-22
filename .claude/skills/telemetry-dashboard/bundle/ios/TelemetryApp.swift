@@ -15,6 +15,7 @@ struct TelemetryApp: App {
                 .environmentObject(sensorManager)
                 .onAppear {
                     sensorManager.startMotionSensors()
+                    sensorManager.connectToBackend()
                 }
         }
     }
@@ -42,6 +43,16 @@ struct ContentView: View {
                 Section("Backend") {
                     Text(sensorManager.isConnected ? "Connected" : "Disconnected")
                         .foregroundColor(sensorManager.isConnected ? .green : .red)
+                }
+                Section("Wave Pattern Mute") {
+                    Text(sensorManager.audioMuted ? "🔇 Muted (pattern matched)" : "🔊 Live")
+                        .foregroundColor(sensorManager.audioMuted ? .red : .primary)
+                    Text("Match score: \(sensorManager.audioMatchScore, specifier: "%.3f")")
+                    HStack {
+                        Button("Capture Pattern") { sensorManager.captureMutePattern() }
+                        Spacer()
+                        Button("Clear Pattern") { sensorManager.clearMutePattern() }
+                    }
                 }
             }
             .navigationTitle("Telemetry")

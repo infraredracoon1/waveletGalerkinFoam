@@ -19,14 +19,43 @@ struct AccelerometerData {
     let z: Double
 }
 
+/// Mirrors the `audio` object in telemetry_backend's /ws/sensors payload,
+/// including the wave-pattern-match mute fields.
+struct AudioReading: Decodable {
+    let fft: [Double]
+    let rms: Double
+    let directionDeg: Double
+    let dominantFreqHz: Double
+    let muted: Bool
+    let matchScore: Double
+
+    enum CodingKeys: String, CodingKey {
+        case fft, rms
+        case directionDeg = "direction_deg"
+        case dominantFreqHz = "dominant_freq_hz"
+        case muted
+        case matchScore = "match_score"
+    }
+}
+
+private struct SensorMessage: Decodable {
+    let audio: AudioReading
+}
+
 final class SensorManager: ObservableObject {
     private let motionManager = CMMotionManager()
     private var webSocketTask: URLSessionWebSocketTask?
+    private let decoder = JSONDecoder()
 
     @Published var accelerometerData = AccelerometerData(x: 0, y: 0, z: 0)
     @Published var gyroscopeData = AccelerometerData(x: 0, y: 0, z: 0)
     @Published var headingDegrees: Double = 0
     @Published var isConnected = false
+
+    /// Wave pattern match / mute state, mirrored from the backend on every
+    /// WebSocket tick — see backend/main.py's PATTERN_MATCH.
+    @Published var audioMuted: Bool = false
+    @Published var audioMatchScore: Double = 0
 
     /// Base URL of the telemetry backend, e.g. "http://192.168.1.20:8000".
     var backendBaseURL: String = "http://localhost:8000"
@@ -69,7 +98,8 @@ final class SensorManager: ObservableObject {
         webSocketTask?.receive { [weak self] result in
             guard let self else { return }
             switch result {
-            case .success:
+            case .success(let message):
+                self.handle(message)
                 self.receiveLoop()
             case .failure:
                 self.isConnected = false
@@ -77,8 +107,36 @@ final class SensorManager: ObservableObject {
         }
     }
 
+    private func handle(_ message: URLSessionWebSocketTask.Message) {
+        guard case .string(let text) = message, let data = text.data(using: .utf8) else { return }
+        guard let decoded = try? decoder.decode(SensorMessage.self, from: data) else { return }
+        DispatchQueue.main.async {
+            self.audioMuted = decoded.audio.muted
+            self.audioMatchScore = decoded.audio.matchScore
+        }
+    }
+
     func disconnect() {
         webSocketTask?.cancel(with: .goingAway, reason: nil)
         isConnected = false
+    }
+
+    // MARK: - Wave pattern mute controls (mirrors the dashboard's Audio tab)
+
+    /// Captures the backend's current audio FFT as the reference pattern to
+    /// match against; subsequent ticks that match closely enough get muted.
+    func captureMutePattern() {
+        postMuteAction(path: "/api/mute/capture")
+    }
+
+    func clearMutePattern() {
+        postMuteAction(path: "/api/mute/clear")
+    }
+
+    private func postMuteAction(path: String) {
+        guard let url = URL(string: backendBaseURL + path) else { return }
+        var request = URLRequest(url: url)
+        request.httpMethod = "POST"
+        URLSession.shared.dataTask(with: request).resume()
     }
 }
