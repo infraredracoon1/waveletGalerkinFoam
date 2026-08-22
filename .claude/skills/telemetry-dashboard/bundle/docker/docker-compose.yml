@@ -1,0 +1,22 @@
+services:
+  backend:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile.backend
+    ports:
+      - "8000:8000"
+    environment:
+      - TELEMETRY_UPDATE_RATE=${TELEMETRY_UPDATE_RATE:-30}
+      - TELEMETRY_SAMPLE_RATE=${TELEMETRY_SAMPLE_RATE:-44100}
+      - TELEMETRY_FFT_SIZE=${TELEMETRY_FFT_SIZE:-2048}
+
+  frontend:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile.frontend
+    ports:
+      - "3000:3000"
+    environment:
+      - TELEMETRY_FRONTEND_PORT=3000
+    depends_on:
+      - backend

@@ -1,0 +1,39 @@
+Telemetry Dashboard Bundle v1.1.0
+==================================
+
+File inventory (12 files):
+
+README.md                     Deployment guide, API reference, troubleshooting
+backend/main.py                FastAPI backend: simulated sensors, REST API, WebSocket stream
+backend/requirements.txt       fastapi, uvicorn[standard], numpy, psutil
+docker/Dockerfile.backend      Backend container image (python:3.11-slim)
+docker/Dockerfile.frontend     Frontend container image (node:20-alpine)
+docker/docker-compose.yml      Two-service orchestration (backend:8000, frontend:3000)
+frontend/index.html            Dashboard UI: 9 tabs, vanilla HTML/CSS/JS, no build step
+frontend/package.json          npm "start" script (zero dependencies)
+frontend/server.js             Zero-dependency static file server
+ios/SensorManager.swift        CoreMotion + WebSocket client (SOURCE ONLY, uncompiled)
+ios/TelemetryApp.swift         SwiftUI view (SOURCE ONLY, uncompiled)
+launch.sh                      Native launcher (venv + node, no Docker required)
+
+Feature checklist
+------------------
+[x] 6 simulated sensors: accelerometer, gyroscope, magnetometer, barometer, microphone, light
+[x] REST API: /health, /api/sensors, /api/stats, /api/calibrate, /api/config, /api/export
+[x] WebSocket streaming: /ws/sensors
+[x] 9 dashboard tabs, all driven by live backend data (verified in a real browser)
+[x] JSON/CSV export
+[x] Native launch verified: pip install, uvicorn + node servers started, endpoints curl-tested
+[x] Docker images verified to build and run correctly (tested with a temporary sandbox-only
+    proxy/CA config; the shipped Dockerfiles are plain and unmodified — see README's
+    "Docker build fails to reach PyPI/npm" troubleshooting note for why a sandboxed build
+    may need proxy configuration that a normal host will not)
+[ ] iOS app: source written, NOT compiled or run (no macOS/Xcode toolchain available)
+
+System requirements
+--------------------
+Native: Python 3.9+, Node.js 18+
+Docker: Docker Engine + Compose v2
+iOS (untested here): Xcode 14+, iOS 13+ target
+
+See README.md for full deployment and configuration instructions.
