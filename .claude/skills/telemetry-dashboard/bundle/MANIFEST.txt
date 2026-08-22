@@ -1,9 +1,12 @@
-Telemetry Dashboard Bundle v1.3.0
+Telemetry Dashboard Bundle v1.4.0
 ==================================
 
-File inventory (12 files):
+File inventory (14 files):
 
-README.md                     Deployment guide, API reference, troubleshooting
+README.md                     Deployment guide, API reference, licensing summary, troubleshooting
+LICENSE                        MIT license for this bundle's own code
+THIRD_PARTY_LICENSES.md        Dependency-by-dependency license audit (verified against installed
+                                package metadata, not memory) + Base44/Apple ToS caveats
 backend/main.py                FastAPI backend: simulated sensors, REST API, WebSocket stream
 backend/requirements.txt       fastapi, uvicorn[standard], numpy, psutil
 docker/Dockerfile.backend      Backend container image (python:3.11-slim)
@@ -45,6 +48,12 @@ Feature checklist
     renders correctly, and switching the field to a live backend goes "live" immediately.
     One manual step remains that no tool here can perform: enable Settings -> Pages ->
     Source -> GitHub Actions once, on GitHub itself.
+[x] Licensing audit: this bundle's own code is MIT (LICENSE); every actual dependency
+    (FastAPI, Starlette, Uvicorn, Pydantic, NumPy, psutil, the GitHub Actions used) verified
+    MIT/BSD-3-Clause against installed package metadata -- see THIRD_PARTY_LICENSES.md.
+    Commercial use and independent research use are both explicitly fine under these
+    licenses. Base44's Terms of Service and Apple's Developer Agreement are flagged as
+    separate platform-ToS matters outside what any tool here can review or agree to.
 
 System requirements
 --------------------

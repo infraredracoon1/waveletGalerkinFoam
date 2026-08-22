@@ -1,8 +1,22 @@
-# Telemetry Dashboard — Deployment Guide (v1.3.0)
+# Telemetry Dashboard — Deployment Guide (v1.4.0)
 
 A working implementation of the dashboard described in the skill's `SKILL.md`:
 a FastAPI backend, a zero-dependency HTML/JS dashboard frontend, Docker
 configs, and iOS source stubs.
+
+## Licensing — safe for commercial use and independent research
+
+This bundle's own code is **MIT-licensed** (`LICENSE`) — permissive, no
+copyleft, commercial use and modification explicitly allowed. Every
+dependency it actually pulls in (FastAPI, Starlette, Uvicorn, Pydantic,
+NumPy, psutil, the GitHub Actions used to test/deploy it) was checked
+directly against its installed package metadata in this session and is
+MIT or BSD-3-Clause — see `THIRD_PARTY_LICENSES.md` for the full,
+package-by-package audit. Two things sit outside open-source licensing and
+are called out there rather than glossed over: Base44's own Terms of
+Service (if you deploy there) and Apple's Developer Program Agreement (if
+you build/ship the iOS app) — neither is something any tool here can
+review or agree to for you.
 
 ## Known limitations (read this first)
 
