@@ -127,6 +127,88 @@
     <div class="card"><h3>360° Wave Detection</h3><canvas id="wave-plot" height="220"></canvas></div>
   </section>
 
+  <section id="tab-modes" class="tab">
+    <div class="grid">
+      <div class="card" style="grid-column: 1 / -1;">
+        <h3>Spherical Harmonics (Monopole → Octupole)</h3>
+        <canvas id="modes-spherical" height="180"></canvas>
+        <div id="modes-spherical-text" style="margin-top:8px; font-size:12px;"></div>
+      </div>
+      <div class="card" style="grid-column: 1 / -1;">
+        <h3>Helical Chiral Modes (Azimuthal Structure)</h3>
+        <canvas id="modes-helical" height="160"></canvas>
+        <div id="modes-helical-text" style="margin-top:6px; font-size:12px;"></div>
+      </div>
+    </div>
+  </section>
+
+  <section id="tab-resonance" class="tab">
+    <div class="grid">
+      <div class="card" style="grid-column: 1 / -1;">
+        <h3>Spectral Resonance Peaks</h3>
+        <canvas id="res-peaks" height="200"></canvas>
+      </div>
+      <div class="card"><h3>Peak 1</h3><div id="res-p1">-</div></div>
+      <div class="card"><h3>Peak 2</h3><div id="res-p2">-</div></div>
+      <div class="card"><h3>Peak 3</h3><div id="res-p3">-</div></div>
+      <div class="card"><h3>Peak 4</h3><div id="res-p4">-</div></div>
+      <div class="card"><h3>Peak 5</h3><div id="res-p5">-</div></div>
+    </div>
+  </section>
+
+  <section id="tab-scattering" class="tab">
+    <div class="grid">
+      <div class="card" style="grid-column: 1 / -1;">
+        <h3>Backscatter Signature (Polar)</h3>
+        <canvas id="scatter-polar" height="220"></canvas>
+      </div>
+      <div class="card"><h3>Correlation</h3><div class="metric" id="scatter-corr">-</div></div>
+      <div class="card"><h3>F/B Ratio</h3><div class="metric" id="scatter-ratio">-</div></div>
+      <div class="card"><h3>Scattered</h3><div class="metric" id="scatter-status">-</div></div>
+    </div>
+  </section>
+
+  <section id="tab-symmetry" class="tab">
+    <div class="grid">
+      <div class="card">
+        <h3>Mode Energy Distribution</h3>
+        <canvas id="sym-bar" height="180"></canvas>
+      </div>
+      <div class="card">
+        <h3>Symmetric vs Antisymmetric</h3>
+        <canvas id="sym-pie" height="180"></canvas>
+      </div>
+      <div class="card"><h3>Symmetric Ratio</h3><div class="metric" id="sym-ratio">-</div></div>
+      <div class="card"><h3>Dominant Mode</h3><div class="metric" id="sym-mode">-</div></div>
+    </div>
+  </section>
+
+  <section id="tab-holographic" class="tab">
+    <div class="grid">
+      <div class="card">
+        <h3>Holographic Tensor Rank Gauge</h3>
+        <canvas id="holo-gauge" height="160"></canvas>
+      </div>
+      <div class="card">
+        <h3>Compression Efficiency</h3>
+        <canvas id="holo-compress" height="160"></canvas>
+      </div>
+      <div class="card">
+        <h3>Energy Preserved</h3>
+        <div class="metric" id="holo-energy">-</div>
+        <div class="note" id="holo-status">-</div>
+      </div>
+      <div class="card">
+        <h3>Bound Status</h3>
+        <div class="metric" id="holo-bound">-</div>
+        <div style="margin-top:8px;">
+          Rank: <span id="holo-rank">-</span> / 10 (max)
+          <br />Compression: <span id="holo-compression">-</span>
+        </div>
+      </div>
+    </div>
+  </section>
+
   <section id="tab-rampg" class="tab">
     <div class="grid">
       <div class="card">
@@ -209,7 +291,9 @@ function setBackend(url) {
 const TABS = [
   ["telemetry", "Telemetry"], ["audio", "Audio"], ["motion", "Motion"],
   ["beamform", "Beamform"], ["hyper", "Hypercardioid"], ["constellations", "Constellations"],
-  ["wave", "Wave Detection"], ["rampg", "RAMPG Solver"], ["export", "Export"],
+  ["wave", "Wave Detection"], ["modes", "Modes"], ["resonance", "Resonance"],
+  ["scattering", "Scattering"], ["symmetry", "Symmetry"], ["holographic", "Holographic"],
+  ["rampg", "RAMPG Solver"], ["export", "Export"],
 ];
 const tabsEl = document.getElementById("tabs");
 TABS.forEach(([id, label], i) => {
@@ -221,7 +305,7 @@ TABS.forEach(([id, label], i) => {
   tabsEl.appendChild(btn);
 });
 let activeTab = "telemetry";
-let lastMotion = null, lastEnvironment = null, lastAudio = null, lastSolver = null;
+let lastMotion = null, lastEnvironment = null, lastAudio = null, lastSolver = null, lastHolographic = null;
 
 function selectTab(id) {
   activeTab = id;
@@ -235,6 +319,7 @@ selectTab("telemetry");
 // up to 60/sec). Only the tab actually on screen needs its canvas(es) current: text
 // fields stay live everywhere (cheap), but drawing is gated to the active tab and
 // replayed from cached data the instant you switch tabs.
+let lastModes = null;
 function renderActiveTabCanvas() {
   if (activeTab === "motion" && lastMotion) { drawTilt(lastMotion.accelerometer); drawCompass(lastMotion.magnetometer.heading); }
   else if (activeTab === "audio" && lastAudio) drawFFT(lastAudio.fft);
@@ -242,6 +327,11 @@ function renderActiveTabCanvas() {
   else if (activeTab === "hyper" && lastAudio) updateHypercardioid(lastAudio.direction_deg);
   else if (activeTab === "constellations" && lastAudio) updateConstellations(lastAudio.fft);
   else if (activeTab === "wave" && lastAudio) updateWave(lastAudio.direction_deg);
+  else if (activeTab === "modes" && lastModes) drawModes(lastModes);
+  else if (activeTab === "resonance" && lastModes) drawResonance(lastModes);
+  else if (activeTab === "scattering" && lastModes) drawScattering(lastModes);
+  else if (activeTab === "symmetry" && lastModes) drawSymmetry(lastModes);
+  else if (activeTab === "holographic" && lastModes) drawHolographic(lastModes);
   else if (activeTab === "rampg" && lastSolver) drawHorizon(lastSolver.roll_deg, lastSolver.pitch_deg);
 }
 
@@ -302,10 +392,12 @@ function connect(gen) {
   ws.onmessage = (ev) => {
     if (gen !== connGen) return;
     const d = JSON.parse(ev.data);
-    lastMotion = d.motion; lastEnvironment = d.environment; lastAudio = d.audio; lastSolver = d.solver;
+    lastMotion = d.motion; lastEnvironment = d.environment; lastAudio = d.audio; lastSolver = d.solver; lastModes = d.modes; lastHolographic = d.holographic_projection;
     updateMotionText(d.motion, d.environment);
     updateAudioText(d.audio);
     updateSolverText(d.solver);
+    updateModesText(d.modes);
+    updateHolographicText(d.holographic_projection);
     renderActiveTabCanvas();
   };
 }
@@ -499,6 +591,204 @@ function drawPerf() {
   };
   plot("cpu", maxCpu, "#5aa9ff");
   plot("mem", maxMem, "#33d17a");
+}
+
+// ---- Wave mode analysis tabs ----
+function updateModesText(modes) {
+  if (!modes) return;
+  const spherical = modes.spherical || {};
+  const helical = modes.helical || {};
+
+  let spherText = "";
+  for (let l = 0; l <= 3; l++) {
+    const key = `l${l}`;
+    if (spherical[key]) {
+      spherText += `${spherical[key].name}: ${fmt(spherical[key].magnitude, 3)} | `;
+    }
+  }
+  document.getElementById("modes-spherical-text").textContent = spherText || "-";
+
+  let helText = "";
+  for (let m = -1; m <= 1; m++) {
+    const key = `m${m:+d}`;
+    if (helical[key]) {
+      helText += `m${m}: ${fmt(helical[key].magnitude, 3)} (${helical[key].helicity}) | `;
+    }
+  }
+  document.getElementById("modes-helical-text").textContent = helText || "-";
+
+  const resonance = modes.resonance || [];
+  for (let i = 0; i < 5; i++) {
+    const res = resonance[i] || {};
+    const hz = (res.bin_index || 0) * 44100 / 64;
+    const text = res.magnitude ? `${fmt(hz, 0)} Hz (Q=${fmt(res.q_factor, 1)})` : "-";
+    document.getElementById(`res-p${i+1}`).innerHTML = `<small>${text}</small>`;
+  }
+}
+
+function updateHolographicText(holo) {
+  if (!holo) return;
+  document.getElementById("holo-energy").textContent = fmt(holo.energy_preserved_pct, 1) + "%";
+  document.getElementById("holo-status").textContent = holo.bound_status || "-";
+  document.getElementById("holo-bound").textContent = holo.bound_maintained ? "✅" : "⚠️";
+  document.getElementById("holo-rank").textContent = holo.tensor_rank + "";
+  document.getElementById("holo-compression").textContent = fmt(holo.compression_ratio * 100, 0) + "%";
+}
+
+function drawModes(modes) {
+  if (!modes) return;
+  const spherical = modes.spherical || {};
+  const helical = modes.helical || {};
+
+  // Draw spherical harmonics bars
+  const [c1, ctx1] = canvasCtx("modes-spherical");
+  ctx1.clearRect(0, 0, c1.width, c1.height);
+  const barW = c1.width / 4;
+  for (let l = 0; l <= 3; l++) {
+    const key = `l${l}`;
+    const mag = spherical[key]?.magnitude || 0;
+    const h = mag * c1.height / 0.2;
+    ctx1.fillStyle = `hsl(${l * 60}, 70%, 55%)`;
+    ctx1.fillRect(l * barW, c1.height - h, barW - 2, h);
+    ctx1.fillStyle = "#aeb6c4"; ctx1.font = "12px sans-serif"; ctx1.textAlign = "center";
+    ctx1.fillText(["monopole", "dipole", "quad", "octo"][l], l * barW + barW / 2, c1.height - 4);
+  }
+
+  // Draw helical modes as spiral
+  const [c2, ctx2] = canvasCtx("modes-helical");
+  ctx2.clearRect(0, 0, c2.width, c2.height);
+  const cx = c2.width / 2, cy = c2.height / 2, r = Math.min(cx, cy) - 10;
+  for (let m = -3; m <= 3; m++) {
+    const key = `m${m:+d}`;
+    const mag = helical[key]?.magnitude || 0;
+    const angle = (m + 3) * Math.PI / 3;
+    const rr = r * (0.3 + mag * 0.7);
+    const x = cx + rr * Math.cos(angle), y = cy + rr * Math.sin(angle);
+    ctx2.fillStyle = m > 0 ? "#ff6b6b" : m < 0 ? "#5aa9ff" : "#ffcc00";
+    ctx2.beginPath(); ctx2.arc(x, y, 4 + mag * 4, 0, 7); ctx2.fill();
+  }
+}
+
+function drawResonance(modes) {
+  if (!modes) return;
+  const resonance = modes.resonance || [];
+  const [c, ctx] = canvasCtx("res-peaks");
+  ctx.clearRect(0, 0, c.width, c.height);
+
+  if (resonance.length === 0) return;
+  const maxQ = Math.max(10, ...resonance.map(r => r.q_factor || 1));
+  const maxMag = Math.max(0.1, ...resonance.map(r => r.magnitude || 0));
+
+  resonance.forEach((res, i) => {
+    const x = (i / 5) * c.width;
+    const w = c.width / 5 - 2;
+    const h = (res.magnitude / maxMag) * c.height * 0.7;
+    ctx.fillStyle = `hsl(${200 + i * 40}, 70%, 55%)`;
+    ctx.fillRect(x, c.height - h, w, h);
+
+    ctx.fillStyle = "#aeb6c4";  ctx.font = "11px sans-serif"; ctx.textAlign = "center";
+    const hz = (res.bin_index * 44100 / 64) | 0;
+    ctx.fillText(hz + "Hz", x + w / 2, 12);
+    ctx.fillText("Q=" + fmt(res.q_factor, 1), x + w / 2, 24);
+  });
+}
+
+function drawScattering(modes) {
+  if (!modes) return;
+  const backscatter = modes.backscatter || {};
+  const correlation = backscatter.correlation || 0;
+  const phase = (backscatter.phase_shift_rad || 0) / Math.PI;
+  const ratio = backscatter.forward_backward_ratio || 1;
+
+  document.getElementById("scatter-corr").innerHTML = fmt(correlation, 3) + "<small></small>";
+  document.getElementById("scatter-ratio").innerHTML = fmt(ratio, 2) + "<small>:1</small>";
+  document.getElementById("scatter-status").textContent = correlation < 0.8 ? "YES" : "NO";
+
+  const [c, ctx] = canvasCtx("scatter-polar");
+  ctx.clearRect(0, 0, c.width, c.height);
+  const cx = c.width / 2, cy = c.height / 2, r = Math.min(cx, cy) - 10;
+
+  // Draw backscatter signature as polar plot
+  for (let deg = 0; deg < 360; deg += 5) {
+    const rad = (deg - 90) * Math.PI / 180;
+    const mag = 0.3 + correlation * 0.7;
+    const x1 = cx + r * mag * Math.cos(rad);
+    const y1 = cy + r * mag * Math.sin(rad);
+    const hue = (deg + phase * 180) % 360;
+    ctx.strokeStyle = `hsl(${hue}, 70%, 55%)`;
+    ctx.lineWidth = 2;
+    ctx.beginPath(); ctx.moveTo(cx, cy); ctx.lineTo(x1, y1); ctx.stroke();
+  }
+}
+
+function drawSymmetry(modes) {
+  if (!modes) return;
+  const symmetry = modes.symmetry || {};
+  const symEnergy = symmetry.symmetric_energy || 0;
+  const antisymEnergy = symmetry.antisymmetric_energy || 0;
+  const ratio = symmetry.symmetric_ratio || 0;
+
+  document.getElementById("sym-ratio").innerHTML = fmt(ratio * 100, 1) + "<small> %</small>";
+  document.getElementById("sym-mode").textContent = symmetry.dominant_mode || "-";
+
+  // Bar chart: symmetric vs antisymmetric
+  const [c1, ctx1] = canvasCtx("sym-bar");
+  ctx1.clearRect(0, 0, c1.width, c1.height);
+  const maxE = Math.max(symEnergy, antisymEnergy, 0.1);
+  const h1 = (symEnergy / maxE) * c1.height;
+  const h2 = (antisymEnergy / maxE) * c1.height;
+  ctx1.fillStyle = "#33d17a"; ctx1.fillRect(20, c1.height - h1, c1.width / 2 - 30, h1);
+  ctx1.fillStyle = "#5aa9ff"; ctx1.fillRect(c1.width / 2 + 10, c1.height - h2, c1.width / 2 - 30, h2);
+  ctx1.fillStyle = "#aeb6c4"; ctx1.font = "12px sans-serif"; ctx1.textAlign = "center";
+  ctx1.fillText("Symmetric", c1.width / 4, 16);
+  ctx1.fillText("Antisymmetric", c1.width * 3 / 4, 16);
+
+  // Pie chart: ratio
+  const [c2, ctx2] = canvasCtx("sym-pie");
+  ctx2.clearRect(0, 0, c2.width, c2.height);
+  const cx = c2.width / 2, cy = c2.height / 2, r = Math.min(cx, cy) - 10;
+  ctx2.fillStyle = "#33d17a";
+  ctx2.beginPath(); ctx2.arc(cx, cy, r, -Math.PI/2, -Math.PI/2 + ratio * 2 * Math.PI); ctx2.lineTo(cx, cy); ctx2.fill();
+  ctx2.fillStyle = "#5aa9ff";
+  ctx2.beginPath(); ctx2.arc(cx, cy, r, -Math.PI/2 + ratio * 2 * Math.PI, -Math.PI/2 + 2 * Math.PI); ctx2.lineTo(cx, cy); ctx2.fill();
+}
+
+function drawHolographic(modes) {
+  if (!modes) return;
+  const d = window.lastModes ? window.lastModes : {};
+
+  // Parse holographic data (would come from WebSocket payload in real implementation)
+  const holo = window.lastHolographic || {};
+  const rank = holo.tensor_rank || 6;
+  const energy = holo.energy_preserved_pct || 85;
+  const ratio = holo.compression_ratio || 0.7;
+
+  // Rank gauge (0-10 circular gauge)
+  const [c1, ctx1] = canvasCtx("holo-gauge");
+  ctx1.clearRect(0, 0, c1.width, c1.height);
+  const cx1 = c1.width / 2, cy1 = c1.height / 2, r1 = Math.min(cx1, cy1) - 10;
+  ctx1.fillStyle = "#1e2430"; ctx1.beginPath(); ctx1.arc(cx1, cy1, r1, 0, 7); ctx1.fill();
+
+  // Color: green if <8, yellow if 8-9, red if >=10
+  const color = rank < 8 ? "#33d17a" : rank < 10 ? "#ffcc00" : "#ff6b6b";
+  ctx1.fillStyle = color;
+  ctx1.beginPath(); ctx1.arc(cx1, cy1, r1, -Math.PI/2, -Math.PI/2 + (rank / 10) * 2 * Math.PI); ctx1.lineTo(cx1, cy1); ctx1.fill();
+
+  ctx1.fillStyle = "#aeb6c4"; ctx1.font = "bold 24px sans-serif"; ctx1.textAlign = "center"; ctx1.textBaseline = "middle";
+  ctx1.fillText(rank, cx1, cy1);
+
+  // Compression efficiency chart
+  const [c2, ctx2] = canvasCtx("holo-compress");
+  ctx2.clearRect(0, 0, c2.width, c2.height);
+  const barH1 = (1 - ratio) * c2.height * 0.8;
+  const barH2 = ratio * c2.height * 0.8;
+  ctx2.fillStyle = "#5aa9ff"; ctx2.fillRect(20, c2.height - barH1, c2.width / 2 - 30, barH1);
+  ctx2.fillStyle = "#33d17a"; ctx2.fillRect(c2.width / 2 + 10, c2.height - barH2, c2.width / 2 - 30, barH2);
+  ctx2.fillStyle = "#aeb6c4"; ctx2.font = "11px sans-serif"; ctx2.textAlign = "center";
+  ctx2.fillText("Original", c2.width / 4, 12);
+  ctx2.fillText("Compressed", c2.width * 3 / 4, 12);
+  ctx2.fillText(fmt((1-ratio)*100, 0) + "%", c2.width / 4, c2.height - 8);
+  ctx2.fillText(fmt(ratio*100, 0) + "%", c2.width * 3 / 4, c2.height - 8);
 }
 
 // ---- Export tab ----
