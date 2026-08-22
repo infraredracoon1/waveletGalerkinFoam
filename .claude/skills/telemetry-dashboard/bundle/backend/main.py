@@ -7,6 +7,8 @@ SKILL.md. Values are physically plausible (noise/drift around real-world
 baselines), not random garbage. Includes advanced wave mode decomposition
 (spherical, helical, resonance, backscatter, symmetry) with holographic
 tensor projection for efficient multi-modal analysis.
+
+Security: JWT authentication + rate limiting on all endpoints.
 """
 import asyncio
 import csv
@@ -17,12 +19,18 @@ import os
 import random
 import time
 from collections import deque
+from datetime import datetime, timedelta
 from typing import Optional
 
 import numpy as np
-from fastapi import FastAPI, Query, WebSocket, WebSocketDisconnect
+from fastapi import FastAPI, Query, WebSocket, WebSocketDisconnect, Depends, HTTPException, status
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
+from fastapi.security import HTTPBearer, HTTPAuthCredentials
+from slowapi import Limiter, _rate_limit_exceeded_handler
+from slowapi.util import get_remote_address
+from slowapi.errors import RateLimitExceeded
+from jose import JWTError, jwt
 
 try:
     import psutil
@@ -32,13 +40,53 @@ except ImportError:  # pragma: no cover - optional dependency
 from wave_modes import analyze_all_modes
 from holographic_projection import project_all_modes
 
+# Security configuration
+SECRET_KEY = os.environ.get("TELEMETRY_SECRET_KEY", "telemetry-dev-key-change-in-production")
+ALGORITHM = "HS256"
+ACCESS_TOKEN_EXPIRE_MINUTES = 60
+DEFAULT_API_KEY = os.environ.get("TELEMETRY_API_KEY", "telemetry-default-key")
+
+limiter = Limiter(key_func=get_remote_address)
 app = FastAPI(title="Telemetry Dashboard Backend", version="2.0.0")
+app.state.limiter = limiter
+app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=["http://localhost:3000", "http://127.0.0.1:3000"],
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+security = HTTPBearer()
+
+def create_access_token(data: dict, expires_delta: Optional[timedelta] = None) -> str:
+    to_encode = data.copy()
+    if expires_delta:
+        expire = datetime.utcnow() + expires_delta
+    else:
+        expire = datetime.utcnow() + timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES)
+    to_encode.update({"exp": expire})
+    return jwt.encode(to_encode, SECRET_KEY, algorithm=ALGORITHM)
+
+async def verify_token(credentials: HTTPAuthCredentials = Depends(security)) -> dict:
+    try:
+        payload = jwt.decode(credentials.credentials, SECRET_KEY, algorithms=[ALGORITHM])
+        return payload
+    except JWTError:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Invalid authentication credentials",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
+
+async def verify_api_key(credentials: HTTPAuthCredentials = Depends(security)) -> dict:
+    if credentials.credentials == DEFAULT_API_KEY:
+        return {"api_key": credentials.credentials}
+    raise HTTPException(
+        status_code=status.HTTP_401_UNAUTHORIZED,
+        detail="Invalid API key",
+    )
 
 START_TIME = time.time()
 _T0 = time.time()
@@ -226,7 +274,17 @@ def read_sensors() -> dict:
     }
 
 
+@app.post("/auth/login")
+@limiter.limit("5/minute")
+async def login(request, credentials: HTTPAuthCredentials = Depends(security)):
+    if credentials.credentials == DEFAULT_API_KEY:
+        access_token = create_access_token({"sub": "telemetry-client"})
+        return {"access_token": access_token, "token_type": "bearer"}
+    raise HTTPException(status_code=401, detail="Invalid credentials")
+
+
 @app.get("/health")
+@limiter.limit("30/minute")
 def health():
     cpu = psutil.cpu_percent(interval=0.05) if psutil else 0.0
     if psutil:
@@ -243,12 +301,14 @@ def health():
 
 
 @app.get("/api/sensors")
-def sensors():
+@limiter.limit("30/minute")
+async def sensors(request, _=Depends(verify_token)):
     return read_sensors()
 
 
 @app.get("/api/stats")
-def stats():
+@limiter.limit("30/minute")
+async def stats(request, _=Depends(verify_token)):
     if not history:
         return {"count": 0}
     accel_z = [h["motion"]["accelerometer"]["z"] for h in history]
@@ -269,7 +329,8 @@ def stats():
 
 
 @app.post("/api/calibrate")
-def calibrate(sensor: str = Query("accelerometer")):
+@limiter.limit("10/minute")
+async def calibrate(request, sensor: str = Query("accelerometer"), _=Depends(verify_token)):
     if sensor == "accelerometer" and history:
         last = history[-1]["motion"]["accelerometer"]
         CALIBRATION["accelerometer"]["offset"] = [last["x"], last["y"], last["z"] - 1.0]
@@ -281,7 +342,8 @@ def calibrate(sensor: str = Query("accelerometer")):
 
 
 @app.get("/api/mute/status")
-def mute_status():
+@limiter.limit("30/minute")
+async def mute_status(request, _=Depends(verify_token)):
     return {
         "has_target": PATTERN_MATCH["target"] is not None,
         "threshold": PATTERN_MATCH["threshold"],
@@ -291,7 +353,8 @@ def mute_status():
 
 
 @app.post("/api/mute/capture")
-def mute_capture():
+@limiter.limit("10/minute")
+async def mute_capture(request, _=Depends(verify_token)):
     """Capture the current audio FFT as the reference pattern to match against."""
     reading = read_sensors()
     PATTERN_MATCH["target"] = reading["audio"]["fft"] if not reading["audio"]["muted"] else None
@@ -306,21 +369,24 @@ def mute_capture():
 
 
 @app.post("/api/mute/clear")
-def mute_clear():
+@limiter.limit("10/minute")
+async def mute_clear(request, _=Depends(verify_token)):
     PATTERN_MATCH["target"] = None
     PATTERN_MATCH["muted"] = False
     PATTERN_MATCH["score"] = 0.0
-    return mute_status()
+    return await mute_status(request, _)
 
 
 @app.post("/api/mute/config")
-def mute_config(threshold: float = Query(..., ge=0.0, le=1.0)):
+@limiter.limit("10/minute")
+async def mute_config(request, threshold: float = Query(..., ge=0.0, le=1.0), _=Depends(verify_token)):
     PATTERN_MATCH["threshold"] = threshold
-    return mute_status()
+    return await mute_status(request, _)
 
 
 @app.get("/api/modes")
-def get_modes():
+@limiter.limit("30/minute")
+async def get_modes(request, _=Depends(verify_token)):
     """Return current wave mode decomposition (spherical, helical, resonance, backscatter, symmetry)."""
     if not mode_history:
         return {}
@@ -328,7 +394,8 @@ def get_modes():
 
 
 @app.get("/api/modes/holographic_bounds")
-def get_holographic_bounds():
+@limiter.limit("30/minute")
+async def get_holographic_bounds(request, _=Depends(verify_token)):
     """Return holographic tensor projection status and bounds validation."""
     reading = read_sensors()
     holographic = reading.get("holographic_projection", {})
@@ -343,16 +410,20 @@ def get_holographic_bounds():
 
 
 @app.get("/api/config")
-def get_config():
+@limiter.limit("30/minute")
+async def get_config(request, _=Depends(verify_token)):
     return CONFIG
 
 
 @app.post("/api/config")
-def set_config(
+@limiter.limit("10/minute")
+async def set_config(
+    request,
     sampleRate: Optional[int] = None,
     fftSize: Optional[int] = None,
     updateRate: Optional[int] = None,
     tensorRank: Optional[int] = None,
+    _=Depends(verify_token),
 ):
     if sampleRate:
         CONFIG["sampleRate"] = sampleRate
@@ -366,7 +437,8 @@ def set_config(
 
 
 @app.get("/api/export")
-def export(format: str = "json"):
+@limiter.limit("10/minute")
+async def export(request, format: str = "json", _=Depends(verify_token)):
     rows = list(history)
     if format == "csv":
         buf = io.StringIO()
@@ -456,6 +528,15 @@ def export(format: str = "json"):
 
 @app.websocket("/ws/sensors")
 async def ws_sensors(websocket: WebSocket):
+    token = websocket.query_params.get("token")
+    if not token:
+        await websocket.close(code=1008, reason="Missing authentication token")
+        return
+    try:
+        jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
+    except JWTError:
+        await websocket.close(code=1008, reason="Invalid authentication token")
+        return
     await websocket.accept()
     try:
         while True:

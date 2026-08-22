@@ -265,6 +265,40 @@ let WS_URL = wsUrlFor(BACKEND);
 let connGen = 0;
 let currentWs = null;
 let failCount = 0;
+let authToken = localStorage.getItem("telemetry_token");
+const API_KEY = prompt("Enter API Key (or leave blank for default):", "telemetry-default-key") || "telemetry-default-key";
+
+async function obtainAuthToken() {
+  try {
+    const resp = await fetch(BACKEND + "/auth/login", {
+      method: "POST",
+      headers: { "Authorization": "Bearer " + API_KEY },
+    });
+    if (!resp.ok) throw new Error("Login failed");
+    const data = await resp.json();
+    authToken = data.access_token;
+    localStorage.setItem("telemetry_token", authToken);
+    return authToken;
+  } catch (e) {
+    console.error("Auth failed:", e);
+    alert("Authentication failed. Check API key.");
+    return null;
+  }
+}
+
+async function ensureAuth() {
+  if (!authToken) authToken = await obtainAuthToken();
+  return authToken;
+}
+
+async function authFetch(url, options = {}) {
+  const token = await ensureAuth();
+  if (!token) throw new Error("Authentication failed");
+  return fetch(url, {
+    ...options,
+    headers: { ...options.headers, "Authorization": "Bearer " + token },
+  });
+}
 
 document.getElementById("backend-input").value = BACKEND;
 document.getElementById("backend-connect").onclick = () => {
@@ -340,7 +374,7 @@ function fmt(n, d = 2) { return typeof n === "number" ? n.toFixed(d) : "-"; }
 // ---- Telemetry tab: poll /health ----
 async function pollHealth() {
   try {
-    const r = await fetch(BACKEND + "/health");
+    const r = await authFetch(BACKEND + "/health");
     const h = await r.json();
     document.getElementById("t-status").textContent = h.status;
     document.getElementById("t-uptime").innerHTML = fmt(h.uptime, 0) + "<small> s</small>";
@@ -370,8 +404,15 @@ const statusText = document.getElementById("status-text");
 const constHistory = [];
 const waveHistory = [];
 
-function connect(gen) {
-  const ws = new WebSocket(WS_URL);
+async function connect(gen) {
+  const token = await ensureAuth();
+  if (!token) {
+    statusText.textContent = "authentication failed";
+    setTimeout(() => connect(gen), 2000);
+    return;
+  }
+  const wsUrl = WS_URL + "?token=" + encodeURIComponent(token);
+  const ws = new WebSocket(wsUrl);
   currentWs = ws;
   ws.onopen = () => {
     if (gen !== connGen) return;
@@ -428,7 +469,7 @@ function updateSolverText(solver) {
 // ---- Wave pattern mute controls ----
 async function refreshMuteStatus() {
   try {
-    const r = await fetch(BACKEND + "/api/mute/status");
+    const r = await authFetch(BACKEND + "/api/mute/status");
     const s = await r.json();
     document.getElementById("mute-threshold").value = s.threshold;
     document.getElementById("mute-threshold-val").textContent = fmt(s.threshold, 2);
@@ -437,16 +478,16 @@ async function refreshMuteStatus() {
 refreshMuteStatus();
 
 document.getElementById("mute-capture").onclick = async () => {
-  await fetch(BACKEND + "/api/mute/capture", { method: "POST" });
+  await authFetch(BACKEND + "/api/mute/capture", { method: "POST" });
   refreshMuteStatus();
 };
 document.getElementById("mute-clear").onclick = async () => {
-  await fetch(BACKEND + "/api/mute/clear", { method: "POST" });
+  await authFetch(BACKEND + "/api/mute/clear", { method: "POST" });
   refreshMuteStatus();
 };
 document.getElementById("mute-apply-threshold").onclick = async () => {
   const t = document.getElementById("mute-threshold").value;
-  await fetch(BACKEND + "/api/mute/config?threshold=" + encodeURIComponent(t), { method: "POST" });
+  await authFetch(BACKEND + "/api/mute/config?threshold=" + encodeURIComponent(t), { method: "POST" });
   refreshMuteStatus();
 };
 
@@ -792,17 +833,35 @@ function drawHolographic(modes) {
 }
 
 // ---- Export tab ----
-document.getElementById("export-json").onclick = () => window.open(BACKEND + "/api/export?format=json", "_blank");
-document.getElementById("export-csv").onclick = () => window.open(BACKEND + "/api/export?format=csv", "_blank");
+document.getElementById("export-json").onclick = async () => {
+  const r = await authFetch(BACKEND + "/api/export?format=json");
+  const blob = await r.blob();
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = "telemetry-" + new Date().toISOString().split("T")[0] + ".json";
+  a.click();
+  URL.revokeObjectURL(url);
+};
+document.getElementById("export-csv").onclick = async () => {
+  const r = await authFetch(BACKEND + "/api/export?format=csv");
+  const blob = await r.blob();
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = "telemetry-" + new Date().toISOString().split("T")[0] + ".csv";
+  a.click();
+  URL.revokeObjectURL(url);
+};
 document.getElementById("cfg-apply").onclick = async () => {
   const rate = document.getElementById("cfg-rate").value;
-  const r = await fetch(BACKEND + "/api/config?updateRate=" + encodeURIComponent(rate), { method: "POST" });
+  const r = await authFetch(BACKEND + "/api/config?updateRate=" + encodeURIComponent(rate), { method: "POST" });
   const cfg = await r.json();
   document.getElementById("cfg-note").textContent = "Applied: " + JSON.stringify(cfg);
 };
-fetch(BACKEND + "/api/config").then(r => r.json()).then(cfg => {
+authFetch(BACKEND + "/api/config").then(r => r.json()).then(cfg => {
   document.getElementById("cfg-rate").value = cfg.updateRate;
-});
+}).catch(e => console.error("Config load failed:", e));
 </script>
 </body>
 </html>
